@@ -152,7 +152,7 @@ export interface ImportOptions {
 /**
  * 操作结果
  */
-export interface OperationResult<T = any> {
+export interface OperationResult<T> {
   success: boolean;
   data?: T;
   error?: string;
@@ -162,7 +162,7 @@ export interface OperationResult<T = any> {
 /**
  * 批量操作结果
  */
-export interface BatchOperationResult<T = any> {
+export interface BatchOperationResult<T> {
   success: boolean;
   results: OperationResult<T>[];
   successCount: number;
@@ -190,7 +190,7 @@ export enum DatabaseEventType {
 export interface DatabaseEvent {
   type: DatabaseEventType;
   timestamp: Date;
-  data?: any;
+  data?: Record<string, Object>;
   source?: string;
 }
 
@@ -253,29 +253,17 @@ export interface BackupInfo {
   checksum: string;
 }
 
-export default {
-  DatabaseStats,
-  EntryField,
-  EntryCreateParams,
-  EntryUpdateParams,
-  GroupCreateParams,
-  GroupUpdateParams,
-  SearchCriteria,
-  SearchResult,
-  DatabaseLoadOptions,
-  DatabaseSaveOptions,
-  EntryFilter,
-  GroupFilter,
-  ExportOptions,
-  ImportOptions,
-  OperationResult,
-  BatchOperationResult,
-  DatabaseEventType,
-  DatabaseEvent,
-  DatabaseEventListener,
-  ResourceManager,
-  RawFileEntry,
-  PasswordStrength,
-  PasswordGenerateOptions,
-  BackupInfo
-}; 
+/**
+ * 文件信息接口
+ */
+export interface FileInfo {
+  name: string;
+  path: string;
+  size: number;
+  createTime: number;
+  modifyTime: number;
+  isFile: boolean;
+  isDirectory: boolean;
+}
+
+ 

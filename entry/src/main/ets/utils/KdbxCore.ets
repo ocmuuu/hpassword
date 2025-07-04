@@ -1,5 +1,5 @@
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import { Kdbx, Credentials, ProtectedValue, KdbxError } from '../lib';
+import { Kdbx, Credentials, ProtectedValue, KdbxError, Int64, ValueType } from '../lib';
 import { 
   DatabaseLoadOptions, 
   DatabaseSaveOptions, 
@@ -13,6 +13,31 @@ import {
 import { logOperation, logError } from './KdbxUtils';
 
 const TAG = 'KdbxCore';
+
+// 定义日志参数接口
+interface LoadFromRawFileLogParams extends Record<string, Object> {
+  fileName: string;
+  hasKeyFile: boolean;
+}
+
+interface LoadFromBufferLogParams extends Record<string, Object> {
+  size: number;
+}
+
+interface CreateNewLogParams extends Record<string, Object> {
+  databaseName: string;
+}
+
+// 定义事件数据接口
+interface LoadEventData {
+  version: string;
+  size?: number;
+  isNew?: boolean;
+}
+
+interface SaveEventData {
+  size: number;
+}
 
 /**
  * KDBX数据库核心操作类
@@ -41,7 +66,11 @@ export class KdbxCore {
     options: DatabaseLoadOptions
   ): Promise<OperationResult<Kdbx>> {
     try {
-      logOperation('loadFromRawFile', { fileName, hasKeyFile: !!options.keyFile });
+      const logParams: LoadFromRawFileLogParams = { 
+        fileName: fileName, 
+        hasKeyFile: !!options.keyFile 
+      };
+      logOperation('loadFromRawFile', logParams);
       
       if (!resourceManager) {
         return {
@@ -96,7 +125,10 @@ export class KdbxCore {
     options: DatabaseLoadOptions
   ): Promise<OperationResult<Kdbx>> {
     try {
-      logOperation('loadFromBuffer', { size: arrayBuffer.byteLength });
+      const logParams: LoadFromBufferLogParams = { 
+        size: arrayBuffer.byteLength 
+      };
+      logOperation('loadFromBuffer', logParams);
 
       // 创建凭据
       const credentials = this.createCredentials(options);
@@ -118,7 +150,11 @@ export class KdbxCore {
       if (options.validateIntegrity) {
         const validationResult = this.validateDatabaseIntegrity(db);
         if (!validationResult.success) {
-          return validationResult;
+          return {
+            success: false,
+            error: validationResult.error,
+            errorCode: validationResult.errorCode
+          };
         }
       }
 
@@ -129,10 +165,11 @@ export class KdbxCore {
       hilog.info(0, TAG, '版本: %{public}s.%{public}s', db.versionMajor.toString(), db.versionMinor.toString());
       
       // 触发加载事件
-      this.emitEvent(DatabaseEventType.DATABASE_LOADED, { 
+      const eventData: LoadEventData = { 
         version: `${db.versionMajor}.${db.versionMinor}`,
         size: arrayBuffer.byteLength 
-      });
+      };
+      this.emitEvent(DatabaseEventType.DATABASE_LOADED, eventData);
 
       return {
         success: true,
@@ -164,7 +201,20 @@ export class KdbxCore {
         };
       }
 
-      logOperation('save', options);
+      // 转换选项为日志参数
+      const logParams: Record<string, Object> = {};
+      if (options) {
+        if (options.compression !== undefined) {
+          logParams.compression = options.compression;
+        }
+        if (options.encryptionRounds !== undefined) {
+          logParams.encryptionRounds = options.encryptionRounds;
+        }
+        if (options.backupCount !== undefined) {
+          logParams.backupCount = options.backupCount;
+        }
+      }
+      logOperation('save', logParams);
 
       // 应用保存选项
       if (options) {
@@ -186,9 +236,10 @@ export class KdbxCore {
       hilog.info(0, TAG, '数据库保存成功，大小: %{public}d 字节', savedData.byteLength);
       
       // 触发保存事件
-      this.emitEvent(DatabaseEventType.DATABASE_SAVED, { 
+      const eventData: SaveEventData = { 
         size: savedData.byteLength 
-      });
+      };
+      this.emitEvent(DatabaseEventType.DATABASE_SAVED, eventData);
 
       return {
         success: true,
@@ -212,21 +263,32 @@ export class KdbxCore {
    */
   async createNew(password: string, databaseName?: string): Promise<OperationResult<Kdbx>> {
     try {
-      logOperation('createNew', { databaseName });
+      const logParams: CreateNewLogParams = { 
+        databaseName: databaseName || '新建数据库' 
+      };
+      logOperation('createNew', logParams);
 
       const credentials = new Credentials(ProtectedValue.fromString(password));
       const db = Kdbx.create(credentials, databaseName || '新建数据库');
       
+      // 设置AES-KDF加密算法，60轮加密
+      db.header.setKdf('ydnzmmKKRGC/dA0IwYpP6g=='); // KdfId.Aes
+      if (db.header.kdfParameters) {
+        // 设置加密轮数为60
+        db.header.kdfParameters.set('R', ValueType.UInt64, new Int64(60));
+      }
+      
       this.database = db;
       this.isLoaded = true;
 
-      hilog.info(0, TAG, '新数据库创建成功');
+      hilog.info(0, TAG, '新数据库创建成功 - 使用AES-KDF加密算法，60轮加密');
       
       // 触发加载事件
-      this.emitEvent(DatabaseEventType.DATABASE_LOADED, { 
+      const eventData: LoadEventData = { 
         version: `${db.versionMajor}.${db.versionMinor}`,
         isNew: true 
-      });
+      };
+      this.emitEvent(DatabaseEventType.DATABASE_LOADED, eventData);
 
       return {
         success: true,
@@ -422,13 +484,32 @@ export class KdbxCore {
   /**
    * 触发事件
    */
-  private emitEvent(eventType: DatabaseEventType, data?: any): void {
+  private emitEvent(eventType: DatabaseEventType, data: LoadEventData | SaveEventData): void {
     const listeners = this.eventListeners.get(eventType);
     if (listeners && listeners.length > 0) {
+      // 转换数据为Record<string, Object>格式
+      const eventData: Record<string, Object> = {};
+      
+      // 检查是否为LoadEventData类型
+      const loadData = data as LoadEventData;
+      if (loadData.version !== undefined) {
+        eventData.version = loadData.version;
+        if (loadData.size !== undefined) {
+          eventData.size = loadData.size;
+        }
+        if (loadData.isNew !== undefined) {
+          eventData.isNew = loadData.isNew;
+        }
+      } else {
+        // 否则为SaveEventData类型
+        const saveData = data as SaveEventData;
+        eventData.size = saveData.size;
+      }
+
       const event: DatabaseEvent = {
         type: eventType,
         timestamp: new Date(),
-        data,
+        data: eventData,
         source: 'KdbxCore'
       };
 

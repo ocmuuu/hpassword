@@ -160,8 +160,9 @@ export function isValidEmail(email: string): boolean {
  */
 export function isValidUrl(url: string): boolean {
   try {
-    new URL(url);
-    return true;
+    // 使用简单的正则表达式验证URL格式
+    const urlRegex = /^https?:\/\/.+/;
+    return urlRegex.test(url);
   } catch {
     return false;
   }
@@ -274,7 +275,7 @@ export function getGroupPath(group: KdbxGroup): string {
   
   while (current) {
     path.unshift(current.name || '未命名');
-    current = current.parentGroup;
+    current = current.parentGroup || null;
   }
   
   return path.join(' / ');
@@ -374,7 +375,7 @@ export function escapeHtml(text: string): string {
  * 生成UUID字符串
  */
 export function generateUuidString(): string {
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c: string) => {
     const r = Math.random() * 16 | 0;
     const v = c === 'x' ? r : (r & 0x3 | 0x8);
     return v.toString(16);
@@ -384,7 +385,7 @@ export function generateUuidString(): string {
 /**
  * 记录操作日志
  */
-export function logOperation(operation: string, details?: any): void {
+export function logOperation(operation: string, details?: Record<string, Object>): void {
   hilog.info(0, TAG, '操作: %{public}s', operation);
   if (details) {
     hilog.info(0, TAG, '详情: %{public}s', JSON.stringify(details));
@@ -400,27 +401,4 @@ export function logError(operation: string, error: Error): void {
   if (error.stack) {
     hilog.error(0, TAG, '堆栈: %{public}s', error.stack);
   }
-}
-
-export default {
-  formatDate,
-  formatFileSize,
-  analyzePasswordStrength,
-  generatePassword,
-  isValidEmail,
-  isValidUrl,
-  extractEntryFields,
-  getEntryDisplayText,
-  setEntryField,
-  calculateGroupStats,
-  getGroupPath,
-  findEntryInGroup,
-  findGroupInGroup,
-  isValidGroupName,
-  isValidEntryTitle,
-  cleanText,
-  escapeHtml,
-  generateUuidString,
-  logOperation,
-  logError
-}; 
+} 
