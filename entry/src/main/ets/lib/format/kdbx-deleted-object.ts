@@ -7,7 +7,7 @@ export class KdbxDeletedObject {
     uuid: KdbxUuid | undefined;
     deletionTime: Date | undefined;
 
-    private readNode(node: Element): void {
+    private readNode(node: any): void {
         switch (node.tagName) {
             case XmlNames.Elem.Uuid:
                 this.uuid = XmlUtils.getUuid(node);
@@ -25,13 +25,14 @@ export class KdbxDeletedObject {
     }
 
     static read(xmlNode: Node): KdbxDeletedObject {
-        const obj = new KdbxDeletedObject();
-        for (let i = 0, cn = xmlNode.childNodes, len = cn.length; i < len; i++) {
-            const childNode = <Element>cn[i];
+        const deletedObject = new KdbxDeletedObject();
+        const nodeAny = xmlNode as any;
+        for (let i = 0, cn = nodeAny.childNodes, len = cn.length; i < len; i++) {
+            const childNode = (cn[i] as any);
             if (childNode.tagName) {
-                obj.readNode(childNode);
+                deletedObject.readNode(childNode);
             }
         }
-        return obj;
+        return deletedObject;
     }
 }

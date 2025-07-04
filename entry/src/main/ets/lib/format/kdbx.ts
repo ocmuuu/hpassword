@@ -30,7 +30,7 @@ export class Kdbx {
     header = new KdbxHeader();
     credentials = new KdbxCredentials(null);
     meta = new KdbxMeta();
-    xml: Document | undefined;
+    xml: any;
     binaries = new KdbxBinaries();
     groups: KdbxGroup[] = [];
     deletedObjects: KdbxDeletedObject[] = [];
@@ -251,7 +251,7 @@ export class Kdbx {
      * Depending on settings, removes either to trash, or completely
      */
     remove<T extends KdbxEntry | KdbxGroup>(object: T): void {
-        let toGroup = undefined;
+        let toGroup: KdbxGroup | undefined = undefined;
         if (this.meta.recycleBinEnabled && this.meta.recycleBinUuid) {
             this.createRecycleBin();
             toGroup = this.getGroup(this.meta.recycleBinUuid);
@@ -575,8 +575,9 @@ export class Kdbx {
             XmlNames.Elem.Root,
             'no root node'
         );
-        for (let i = 0, cn = node.childNodes, len = cn.length; i < len; i++) {
-            const childNode = <Element>cn[i];
+        const nodeAny = node as any;
+        for (let i = 0, cn = nodeAny.childNodes, len = cn.length; i < len; i++) {
+            const childNode = (cn[i] as any);
             switch (childNode.tagName) {
                 case XmlNames.Elem.Group:
                     this.readGroup(childNode, ctx);
@@ -589,12 +590,11 @@ export class Kdbx {
     }
 
     private readDeletedObjects(node: Node): void {
-        for (let i = 0, cn = node.childNodes, len = cn.length; i < len; i++) {
-            const childNode = <Element>cn[i];
-            switch (childNode.tagName) {
-                case XmlNames.Elem.DeletedObject:
-                    this.deletedObjects.push(KdbxDeletedObject.read(childNode));
-                    break;
+        const nodeAny = node as any;
+        for (let i = 0, cn = nodeAny.childNodes, len = cn.length; i < len; i++) {
+            const childNode = (cn[i] as any);
+            if (childNode.tagName === XmlNames.Elem.DeletedObject) {
+                this.deletedObjects.push(KdbxDeletedObject.read(childNode));
             }
         }
     }

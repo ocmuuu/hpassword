@@ -231,7 +231,7 @@ export class KdbxMeta {
         }
     }
 
-    private readNode(node: Element, ctx: KdbxContext) {
+    private readNode(node: any, ctx: KdbxContext) {
         switch (node.tagName) {
             case XmlNames.Elem.Generator:
                 this.generator = XmlUtils.getText(node);
@@ -317,9 +317,10 @@ export class KdbxMeta {
         }
     }
 
-    private readMemoryProtection(node: Element) {
-        for (let i = 0, cn = node.childNodes, len = cn.length; i < len; i++) {
-            const childNode = <Element>cn[i];
+    private readMemoryProtection(node: any) {
+        const nodeAny = node as any;
+        for (let i = 0, cn = nodeAny.childNodes, len = cn.length; i < len; i++) {
+            const childNode = (cn[i] as any);
             switch (childNode.tagName) {
                 case XmlNames.Elem.ProtTitle:
                     this.memoryProtection.title = XmlUtils.getBoolean(childNode) ?? undefined;
@@ -340,7 +341,7 @@ export class KdbxMeta {
         }
     }
 
-    private writeMemoryProtection(parentNode: Element) {
+    private writeMemoryProtection(parentNode: any) {
         const node = XmlUtils.addChildNode(parentNode, XmlNames.Elem.MemoryProt);
         XmlUtils.setBoolean(
             XmlUtils.addChildNode(node, XmlNames.Elem.ProtTitle),
@@ -364,19 +365,21 @@ export class KdbxMeta {
         );
     }
 
-    private readCustomIcons(node: Element) {
-        for (let i = 0, cn = node.childNodes, len = cn.length; i < len; i++) {
-            const childNode = <Element>cn[i];
+    private readCustomIcons(node: any) {
+        const nodeAny = node as any;
+        for (let i = 0, cn = nodeAny.childNodes, len = cn.length; i < len; i++) {
+            const childNode = (cn[i] as any);
             if (childNode.tagName === XmlNames.Elem.CustomIconItem) {
                 this.readCustomIcon(childNode);
             }
         }
     }
 
-    private readCustomIcon(node: Element) {
+    private readCustomIcon(node: any) {
         let uuid, data, name, lastModified;
-        for (let i = 0, cn = node.childNodes, len = cn.length; i < len; i++) {
-            const childNode = <Element>cn[i];
+        const nodeAny = node as any;
+        for (let i = 0, cn = nodeAny.childNodes, len = cn.length; i < len; i++) {
+            const childNode = (cn[i] as any);
             switch (childNode.tagName) {
                 case XmlNames.Elem.CustomIconItemID:
                     uuid = XmlUtils.getUuid(childNode);
@@ -397,7 +400,7 @@ export class KdbxMeta {
         }
     }
 
-    private writeCustomIcons(parentNode: Element, ctx: KdbxContext) {
+    private writeCustomIcons(parentNode: any, ctx: KdbxContext) {
         const node = XmlUtils.addChildNode(parentNode, XmlNames.Elem.CustomIcons);
         for (const [uuid, { data, name, lastModified }] of this.customIcons) {
             if (data) {
@@ -428,16 +431,17 @@ export class KdbxMeta {
         }
     }
 
-    private readBinaries(node: Element, ctx: KdbxContext) {
-        for (let i = 0, cn = node.childNodes, len = cn.length; i < len; i++) {
-            const childNode = <Element>cn[i];
+    private readBinaries(node: any, ctx: KdbxContext) {
+        const nodeAny = node as any;
+        for (let i = 0, cn = nodeAny.childNodes, len = cn.length; i < len; i++) {
+            const childNode = (cn[i] as any);
             if (childNode.tagName === XmlNames.Elem.Binary) {
                 this.readBinary(childNode, ctx);
             }
         }
     }
 
-    private readBinary(node: Element, ctx: KdbxContext) {
+    private readBinary(node: any, ctx: KdbxContext) {
         const id = node.getAttribute(XmlNames.Attr.Id);
         const binary = XmlUtils.getProtectedBinary(node);
         if (id && binary) {
@@ -448,7 +452,7 @@ export class KdbxMeta {
         }
     }
 
-    private writeBinaries(parentNode: Element, ctx: KdbxContext) {
+    private writeBinaries(parentNode: any, ctx: KdbxContext) {
         const node = XmlUtils.addChildNode(parentNode, XmlNames.Elem.Binaries);
         const binaries = ctx.kdbx.binaries.getAll();
         for (const binary of binaries) {
@@ -458,11 +462,11 @@ export class KdbxMeta {
         }
     }
 
-    private readCustomData(node: Element) {
+    private readCustomData(node: any) {
         this.customData = KdbxCustomData.read(node);
     }
 
-    private writeCustomData(parentNode: Element, ctx: KdbxContext) {
+    private writeCustomData(parentNode: any, ctx: KdbxContext) {
         KdbxCustomData.write(parentNode, ctx, this.customData);
     }
 
@@ -665,8 +669,9 @@ export class KdbxMeta {
 
     static read(xmlNode: Node, ctx: KdbxContext): KdbxMeta {
         const meta = new KdbxMeta();
-        for (let i = 0, cn = xmlNode.childNodes, len = cn.length; i < len; i++) {
-            const childNode = <Element>cn[i];
+        const nodeAny = xmlNode as any;
+        for (let i = 0, cn = nodeAny.childNodes, len = cn.length; i < len; i++) {
+            const childNode = (cn[i] as any);
             if (childNode.tagName) {
                 meta.readNode(childNode, ctx);
             }

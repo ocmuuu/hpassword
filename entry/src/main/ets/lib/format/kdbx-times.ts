@@ -11,7 +11,7 @@ export class KdbxTimes {
     usageCount: number | undefined;
     locationChanged: Date | undefined;
 
-    private readNode(node: Element): void {
+    private readNode(node: any): void {
         switch (node.tagName) {
             case XmlNames.Elem.CreationTime:
                 this.creationTime = XmlUtils.getDate(node);
@@ -55,7 +55,7 @@ export class KdbxTimes {
         this.lastAccessTime = now;
     }
 
-    write(parentNode: Element, ctx: KdbxContext): void {
+    write(parentNode: any, ctx: KdbxContext): void {
         const node = XmlUtils.addChildNode(parentNode, XmlNames.Elem.Times);
         ctx.setXmlDate(XmlUtils.addChildNode(node, XmlNames.Elem.CreationTime), this.creationTime);
         ctx.setXmlDate(XmlUtils.addChildNode(node, XmlNames.Elem.LastModTime), this.lastModTime);
@@ -86,13 +86,14 @@ export class KdbxTimes {
     }
 
     static read(xmlNode: Node): KdbxTimes {
-        const obj = new KdbxTimes();
-        for (let i = 0, cn = xmlNode.childNodes, len = cn.length; i < len; i++) {
-            const childNode = <Element>cn[i];
+        const times = new KdbxTimes();
+        const nodeAny = xmlNode as any;
+        for (let i = 0, cn = nodeAny.childNodes, len = cn.length; i < len; i++) {
+            const childNode = (cn[i] as any);
             if (childNode.tagName) {
-                obj.readNode(childNode);
+                times.readNode(childNode);
             }
         }
-        return obj;
+        return times;
     }
 }

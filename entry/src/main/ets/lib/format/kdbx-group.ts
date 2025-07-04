@@ -35,7 +35,7 @@ export class KdbxGroup {
         return this.times.locationChanged?.getTime() ?? 0;
     }
 
-    private readNode(node: Element, ctx: KdbxContext) {
+    private readNode(node: any, ctx: KdbxContext) {
         switch (node.tagName) {
             case XmlNames.Elem.Uuid:
                 this.uuid = XmlUtils.getUuid(node) ?? new KdbxUuid();
@@ -316,18 +316,16 @@ export class KdbxGroup {
     }
 
     static read(xmlNode: Node, ctx: KdbxContext, parentGroup?: KdbxGroup): KdbxGroup {
-        const grp = new KdbxGroup();
-        for (let i = 0, cn = xmlNode.childNodes, len = cn.length; i < len; i++) {
-            const childNode = <Element>cn[i];
+        const group = new KdbxGroup();
+        const nodeAny = xmlNode as any;
+        for (let i = 0, cn = nodeAny.childNodes, len = cn.length; i < len; i++) {
+            const childNode = (cn[i] as any);
             if (childNode.tagName) {
-                grp.readNode(childNode, ctx);
+                group.readNode(childNode, ctx);
             }
         }
-        if (grp.uuid.empty) {
-            // some clients don't write ids
-            grp.uuid = KdbxUuid.random();
-        }
-        grp.parentGroup = parentGroup;
-        return grp;
+        group.parentGroup = parentGroup;
+        return group;
     }
 }
+

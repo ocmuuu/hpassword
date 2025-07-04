@@ -10,6 +10,9 @@ import { ProtectedValue } from '../crypto/protected-value';
 import { ProtectSaltGenerator } from '../crypto/protect-salt-generator';
 import { KdbxBinaries, KdbxBinaryOrRef } from '../format/kdbx-binaries';
 
+// 通过globalThis访问polyfill提供的全局对象
+const globalObj = globalThis as any;
+
 const DateRegex = /\.\d\d\d/;
 const EpochSeconds = 62135596800;
 const TagsSplitRegex = /\s*[;,:]\s*/;
@@ -22,8 +25,8 @@ declare global {
 }
 
 function createDOMParser() {
-    if (global.DOMParser) {
-        return new global.DOMParser();
+    if (globalObj.DOMParser) {
+        return new globalObj.DOMParser();
     }
 
     const parserArg = {
@@ -41,23 +44,23 @@ function createDOMParser() {
     };
 
     /* eslint-disable @typescript-eslint/no-var-requires,@typescript-eslint/no-unsafe-assignment,@typescript-eslint/no-unsafe-call */
-    const { DOMParser } = require('@xmldom/xmldom');
-    return <typeof global.DOMParser>new DOMParser(parserArg);
+    const { DOMParser } = globalObj.require('@xmldom/xmldom');
+    return new DOMParser(parserArg);
     /* eslint-enable */
 }
 
 function createXMLSerializer() {
-    if (global.XMLSerializer) {
-        return new global.XMLSerializer();
+    if (globalObj.XMLSerializer) {
+        return new globalObj.XMLSerializer();
     }
 
     /* eslint-disable @typescript-eslint/no-var-requires,@typescript-eslint/no-unsafe-assignment,@typescript-eslint/no-unsafe-call */
-    const { XMLSerializer } = require('@xmldom/xmldom');
-    return <typeof global.XMLSerializer>new XMLSerializer();
+    const { XMLSerializer } = globalObj.require('@xmldom/xmldom');
+    return new XMLSerializer();
     /* eslint-enable */
 }
 
-export function parse(xml: string): Document {
+export function parse(xml: string): any {
     const parser = createDOMParser();
 
     let doc;
@@ -79,7 +82,7 @@ export function parse(xml: string): Document {
     return doc;
 }
 
-export function serialize(doc: Document, prettyPrint = false): string {
+export function serialize(doc: any, prettyPrint = false): string {
     if (prettyPrint) {
         prettyPrintXmlNode(doc, 0);
     }
@@ -91,7 +94,8 @@ export function serialize(doc: Document, prettyPrint = false): string {
 }
 
 function prettyPrintXmlNode(node: Node, indentationLevel: number): void {
-    const numChildNodes = node.childNodes.length;
+    const nodeAny = node as any;
+    const numChildNodes = nodeAny.childNodes ? nodeAny.childNodes.length : 0;
 
     if (numChildNodes === 0) {
         return;
@@ -99,13 +103,13 @@ function prettyPrintXmlNode(node: Node, indentationLevel: number): void {
 
     const formatStr = '\n' + '    '.repeat(indentationLevel);
     const prevFormatStr = indentationLevel > 0 ? '\n' + '    '.repeat(indentationLevel - 1) : '';
-    const doc = node.ownerDocument || <Document>node;
+    const doc = nodeAny.ownerDocument || node;
 
     const childNodes = [];
     let childNode;
 
     for (let i = 0; i < numChildNodes; i++) {
-        childNode = node.childNodes[i];
+        childNode = nodeAny.childNodes[i];
         if (
             childNode.nodeType !== doc.TEXT_NODE &&
             childNode.nodeType !== doc.PROCESSING_INSTRUCTION_NODE
@@ -120,19 +124,19 @@ function prettyPrintXmlNode(node: Node, indentationLevel: number): void {
         const isFirstDocumentNode = indentationLevel === 0 && j === 0;
         if (!isFirstDocumentNode) {
             const textNodeBefore = doc.createTextNode(formatStr);
-            node.insertBefore(textNodeBefore, childNode);
+            (node as any).insertBefore(textNodeBefore, childNode);
         }
 
         if (!childNode.nextSibling && indentationLevel > 0) {
             const textNodeAfter = doc.createTextNode(prevFormatStr);
-            node.appendChild(textNodeAfter);
+            (node as any).appendChild(textNodeAfter);
         }
 
         prettyPrintXmlNode(childNode, indentationLevel + 1);
     }
 }
 
-export function create(rootNode: string): Document {
+export function create(rootNode: string): any {
     return parse('<?xml version="1.0" encoding="utf-8" standalone="yes"?><' + rootNode + '/>');
 }
 
@@ -143,10 +147,13 @@ export function getChildNode(
     tagName: string,
     errorMsgIfAbsent?: string
 ): Node | null {
-    if (node && node.childNodes) {
-        for (let i = 0, cn = node.childNodes, len = cn.length; i < len; i++) {
-            if ((<Element>cn[i]).tagName === tagName) {
-                return cn[i];
+    if (node) {
+        const nodeAny = node as any;
+        if (nodeAny.childNodes) {
+            for (let i = 0, cn = nodeAny.childNodes, len = cn.length; i < len; i++) {
+                if ((cn[i] as any).tagName === tagName) {
+                    return cn[i];
+                }
             }
         }
     }
@@ -157,19 +164,23 @@ export function getChildNode(
     }
 }
 
-export function addChildNode(node: Node, tagName: string): Element {
-    return node.appendChild((node.ownerDocument || <Document>node).createElement(tagName));
+export function addChildNode(node: Node, tagName: string): any {
+    return (node as any).appendChild(((node as any).ownerDocument || node).createElement(tagName));
 }
 
 export function getText(node: Node | null): string | undefined {
-    if (!node?.childNodes) {
+    if (!node) {
         return undefined;
     }
-    return node.protectedValue ? node.protectedValue.getText() : (node.textContent ?? undefined);
+    const nodeAny = node as any;
+    if (!nodeAny.childNodes) {
+        return undefined;
+    }
+    return node.protectedValue ? node.protectedValue.getText() : (nodeAny.textContent ?? undefined);
 }
 
 export function setText(node: Node, text: string | undefined): void {
-    node.textContent = text || '';
+    (node as any).textContent = text || '';
 }
 
 export function getTags(node: Node): string[] {
@@ -277,13 +288,13 @@ export function setUuid(
 }
 
 export function getProtectedText(node: Node): ProtectedValue | string | undefined {
-    return (node.protectedValue || node.textContent) ?? undefined;
+    return (node.protectedValue || (node as any).textContent) ?? undefined;
 }
 
 export function setProtectedText(node: Node, text: ProtectedValue | string): void {
     if (text instanceof ProtectedValue) {
         node.protectedValue = text;
-        (<Element>node).setAttribute(XmlNames.Attr.Protected, 'True');
+        (node as any).setAttribute(XmlNames.Attr.Protected, 'True');
     } else {
         setText(node, text);
     }
@@ -293,15 +304,15 @@ export function getProtectedBinary(node: Node): KdbxBinaryOrRef | undefined {
     if (node.protectedValue) {
         return node.protectedValue;
     }
-    const text = node.textContent;
-    const ref = (<Element>node).getAttribute(XmlNames.Attr.Ref);
+    const text = (node as any).textContent;
+    const ref = (node as any).getAttribute(XmlNames.Attr.Ref);
     if (ref) {
         return { ref };
     }
     if (!text) {
         return undefined;
     }
-    const compressed = strToBoolean((<Element>node).getAttribute(XmlNames.Attr.Compressed));
+    const compressed = strToBoolean((node as any).getAttribute(XmlNames.Attr.Compressed));
     let bytes = base64ToBytes(text);
     if (compressed) {
         bytes = gunzipSync(bytes);
@@ -312,20 +323,22 @@ export function getProtectedBinary(node: Node): KdbxBinaryOrRef | undefined {
 export function setProtectedBinary(node: Node, binary: KdbxBinaryOrRef): void {
     if (binary instanceof ProtectedValue) {
         node.protectedValue = binary;
-        (<Element>node).setAttribute(XmlNames.Attr.Protected, 'True');
+        (node as any).setAttribute(XmlNames.Attr.Protected, 'True');
     } else if (KdbxBinaries.isKdbxBinaryRef(binary)) {
-        (<Element>node).setAttribute(XmlNames.Attr.Ref, binary.ref);
+        (node as any).setAttribute(XmlNames.Attr.Ref, binary.ref);
     } else {
         setBytes(node, binary);
     }
 }
 
-export function traverse(node: Node, callback: (node: Element) => void): void {
-    callback(<Element>node);
-    for (let i = 0, cn = node.childNodes, len = cn.length; i < len; i++) {
-        const childNode = <Element>cn[i];
-        if (childNode.tagName) {
-            traverse(childNode, callback);
+export function traverse(node: Node, callback: (node: any) => void): void {
+    callback(node as any);
+    if ((node as any).childNodes) {
+        for (let i = 0, cn = (node as any).childNodes, len = cn.length; i < len; i++) {
+            const childNode = cn[i] as any;
+            if (childNode.tagName) {
+                traverse(childNode, callback);
+            }
         }
     }
 }

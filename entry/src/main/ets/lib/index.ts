@@ -1,3 +1,6 @@
+// 首先导入polyfill以确保全局API可用
+import './polyfills';
+
 import { ChaCha20 } from './crypto/chacha20';
 import * as CryptoEngine from './crypto/crypto-engine';
 import * as HashedBlockTransform from './crypto/hashed-block-transform';

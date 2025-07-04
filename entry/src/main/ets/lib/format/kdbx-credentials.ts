@@ -75,12 +75,12 @@ export class KdbxCredentials {
                 }
 
                 const versionEl = XmlUtils.getChildNode(metaEl, 'Version');
-                if (!versionEl?.textContent) {
+                if (!(versionEl as any)?.textContent) {
                     return Promise.reject(
                         new KdbxError(ErrorCodes.InvalidArg, 'key file without version')
                     );
                 }
-                keyFileVersion = +versionEl.textContent.split('.')[0];
+                keyFileVersion = +(versionEl as any).textContent.split('.')[0];
 
                 const keyEl = XmlUtils.getChildNode(xml.documentElement, 'Key');
                 if (!keyEl) {
@@ -89,8 +89,8 @@ export class KdbxCredentials {
                     );
                 }
 
-                dataEl = <Element>XmlUtils.getChildNode(keyEl, 'Data');
-                if (!dataEl?.textContent) {
+                dataEl = (XmlUtils.getChildNode(keyEl, 'Data') as any);
+                if (!(dataEl as any)?.textContent) {
                     return Promise.reject(
                         new KdbxError(ErrorCodes.InvalidArg, 'key file without key data')
                     );
@@ -103,11 +103,11 @@ export class KdbxCredentials {
 
             switch (keyFileVersion) {
                 case 1:
-                    this.keyFileHash = ProtectedValue.fromBinary(base64ToBytes(dataEl.textContent));
+                    this.keyFileHash = ProtectedValue.fromBinary(base64ToBytes((dataEl as any).textContent));
                     break;
                 case 2: {
-                    const keyFileData = hexToBytes(dataEl.textContent.replace(/\s+/g, ''));
-                    const keyFileDataHash = dataEl.getAttribute('Hash');
+                    const keyFileData = hexToBytes((dataEl as any).textContent.replace(/\s+/g, ''));
+                    const keyFileDataHash = (dataEl as any).getAttribute('Hash');
                     return CryptoEngine.sha256(keyFileData).then((computedHash) => {
                         const computedHashStr = bytesToHex(
                             new Uint8Array(computedHash).subarray(0, 4)

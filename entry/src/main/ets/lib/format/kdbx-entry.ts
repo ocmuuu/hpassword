@@ -61,7 +61,7 @@ export class KdbxEntry {
         return this.times.locationChanged?.getTime() ?? 0;
     }
 
-    private readNode(node: Element, ctx: KdbxContext) {
+    private readNode(node: any, ctx: KdbxContext) {
         switch (node.tagName) {
             case XmlNames.Elem.Uuid:
                 this.uuid = XmlUtils.getUuid(node) ?? new KdbxUuid();
@@ -111,7 +111,7 @@ export class KdbxEntry {
         }
     }
 
-    private readField(node: Element) {
+    private readField(node: any) {
         const keyNode = XmlUtils.getChildNode(node, XmlNames.Elem.Key),
             valueNode = XmlUtils.getChildNode(node, XmlNames.Elem.Value);
         if (keyNode && valueNode) {
@@ -123,7 +123,7 @@ export class KdbxEntry {
         }
     }
 
-    private writeFields(parentNode: Node) {
+    private writeFields(parentNode: any) {
         for (const [field, value] of this.fields) {
             if (value !== undefined && value !== null) {
                 const node = XmlUtils.addChildNode(parentNode, XmlNames.Elem.String);
@@ -133,7 +133,7 @@ export class KdbxEntry {
         }
     }
 
-    private readBinary(node: Element, ctx: KdbxContext) {
+    private readBinary(node: any, ctx: KdbxContext) {
         const keyNode = XmlUtils.getChildNode(node, XmlNames.Elem.Key),
             valueNode = XmlUtils.getChildNode(node, XmlNames.Elem.Value);
         if (keyNode && valueNode) {
@@ -152,7 +152,7 @@ export class KdbxEntry {
         }
     }
 
-    private writeBinaries(parentNode: Node, ctx: KdbxContext) {
+    private writeBinaries(parentNode: any, ctx: KdbxContext) {
         for (const [id, data] of this.binaries) {
             let bin: KdbxBinaryOrRef;
             if (KdbxBinaries.isKdbxBinaryWithHash(data)) {
@@ -170,9 +170,9 @@ export class KdbxEntry {
         }
     }
 
-    private readAutoType(node: Node) {
+    private readAutoType(node: any) {
         for (let i = 0, cn = node.childNodes, len = cn.length; i < len; i++) {
-            const childNode = <Element>cn[i];
+            const childNode = (cn[i] as any);
             switch (childNode.tagName) {
                 case XmlNames.Elem.AutoTypeEnabled:
                     this.autoType.enabled = XmlUtils.getBoolean(childNode) ?? true;
@@ -191,11 +191,11 @@ export class KdbxEntry {
         }
     }
 
-    private readAutoTypeItem(node: Node) {
+    private readAutoTypeItem(node: any) {
         let window = '';
         let keystrokeSequence = '';
         for (let i = 0, cn = node.childNodes, len = cn.length; i < len; i++) {
-            const childNode = <Element>cn[i];
+            const childNode = (cn[i] as any);
             switch (childNode.tagName) {
                 case XmlNames.Elem.Window:
                     window = XmlUtils.getText(childNode) || '';
@@ -210,7 +210,7 @@ export class KdbxEntry {
         }
     }
 
-    private writeAutoType(parentNode: Node) {
+    private writeAutoType(parentNode: any) {
         const node = XmlUtils.addChildNode(parentNode, XmlNames.Elem.AutoType);
         XmlUtils.setBoolean(
             XmlUtils.addChildNode(node, XmlNames.Elem.AutoTypeEnabled),
@@ -237,9 +237,9 @@ export class KdbxEntry {
         }
     }
 
-    private readHistory(node: Node, ctx: KdbxContext) {
+    private readHistory(node: any, ctx: KdbxContext) {
         for (let i = 0, cn = node.childNodes, len = cn.length; i < len; i++) {
-            const childNode = <Element>cn[i];
+            const childNode = (cn[i] as any);
             switch (childNode.tagName) {
                 case XmlNames.Elem.Entry:
                     this.history.push(KdbxEntry.read(childNode, ctx));
@@ -248,18 +248,18 @@ export class KdbxEntry {
         }
     }
 
-    private writeHistory(parentNode: Node, ctx: KdbxContext) {
+    private writeHistory(parentNode: any, ctx: KdbxContext) {
         const historyNode = XmlUtils.addChildNode(parentNode, XmlNames.Elem.History);
         for (const historyEntry of this.history) {
             historyEntry.write(historyNode, ctx);
         }
     }
 
-    private readCustomData(node: Node) {
+    private readCustomData(node: any) {
         this.customData = KdbxCustomData.read(node);
     }
 
-    private writeCustomData(parentNode: Node, ctx: KdbxContext) {
+    private writeCustomData(parentNode: any, ctx: KdbxContext) {
         if (this.customData) {
             KdbxCustomData.write(parentNode, ctx, this.customData);
         }
@@ -276,7 +276,7 @@ export class KdbxEntry {
         this._editState[isAdded ? 'added' : 'deleted'].push(dt.getTime());
     }
 
-    write(parentNode: Element, ctx: KdbxContext): void {
+    write(parentNode: any, ctx: KdbxContext): void {
         const node = XmlUtils.addChildNode(parentNode, XmlNames.Elem.Entry);
         XmlUtils.setUuid(XmlUtils.addChildNode(node, XmlNames.Elem.Uuid), this.uuid);
         XmlUtils.setNumber(XmlUtils.addChildNode(node, XmlNames.Elem.Icon), this.icon || Icons.Key);
@@ -474,10 +474,10 @@ export class KdbxEntry {
         return entry;
     }
 
-    static read(xmlNode: Node, ctx: KdbxContext, parentGroup?: KdbxGroup): KdbxEntry {
+    static read(xmlNode: any, ctx: KdbxContext, parentGroup?: KdbxGroup): KdbxEntry {
         const entry = new KdbxEntry();
         for (let i = 0, cn = xmlNode.childNodes, len = cn.length; i < len; i++) {
-            const childNode = <Element>cn[i];
+            const childNode = (cn[i] as any);
             if (childNode.tagName) {
                 entry.readNode(childNode, ctx);
             }

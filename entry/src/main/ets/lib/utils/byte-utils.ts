@@ -1,5 +1,7 @@
-const textEncoder = new TextEncoder();
-const textDecoder = new TextDecoder();
+// 通过globalThis访问polyfill提供的全局对象
+const globalObj = globalThis as any;
+const textEncoder = new globalObj.TextEncoder();
+const textDecoder = new globalObj.TextDecoder();
 
 type ArrayBufferOrArray = ArrayBuffer | Uint8Array;
 
@@ -29,29 +31,29 @@ export function stringToBytes(str: string): Uint8Array {
 }
 
 export function base64ToBytes(str: string): Uint8Array {
-    if (typeof atob === 'function') {
-        const byteStr = atob(str);
+    if (typeof globalObj.atob === 'function') {
+        const byteStr = globalObj.atob(str);
         const arr = new Uint8Array(byteStr.length);
         for (let i = 0; i < byteStr.length; i++) {
             arr[i] = byteStr.charCodeAt(i);
         }
         return arr;
     } else {
-        const buffer = Buffer.from(str, 'base64');
+        const buffer = globalObj.Buffer.from(str, 'base64');
         return new Uint8Array(buffer);
     }
 }
 
 export function bytesToBase64(arr: ArrayBufferOrArray): string {
     const intArr = arr instanceof ArrayBuffer ? new Uint8Array(arr) : arr;
-    if (typeof btoa === 'function') {
+    if (typeof globalObj.btoa === 'function') {
         let str = '';
         for (let i = 0; i < intArr.length; i++) {
             str += String.fromCharCode(intArr[i]);
         }
-        return btoa(str);
+        return globalObj.btoa(str);
     } else {
-        const buffer = Buffer.from(arr);
+        const buffer = globalObj.Buffer.from(arr);
         return buffer.toString('base64');
     }
 }

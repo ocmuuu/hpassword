@@ -7,12 +7,13 @@ export type KdbxCustomDataItem = { value: string | undefined; lastModified?: Dat
 export type KdbxCustomDataMap = Map<string, KdbxCustomDataItem>;
 
 export class KdbxCustomData {
-    static read(node: Node): KdbxCustomDataMap {
+    static read(xmlNode: Node): KdbxCustomDataMap {
         const customData = new Map<string, KdbxCustomDataItem>();
-        for (let i = 0, cn = node.childNodes, len = cn.length; i < len; i++) {
-            const childNode = <Element>cn[i];
+        const nodeAny = xmlNode as any;
+        for (let i = 0, cn = nodeAny.childNodes, len = cn.length; i < len; i++) {
+            const childNode = (cn[i] as any);
             if (childNode.tagName === XmlNames.Elem.StringDictExItem) {
-                this.readItem(childNode, customData);
+                KdbxCustomData.readItem(childNode, customData);
             }
         }
         return customData;
@@ -42,28 +43,23 @@ export class KdbxCustomData {
         }
     }
 
-    private static readItem(node: Element, customData: KdbxCustomDataMap): void {
-        let key, value, lastModified;
-        for (let i = 0, cn = node.childNodes, len = cn.length; i < len; i++) {
-            const childNode = <Element>cn[i];
+    private static readItem(node: any, customData: KdbxCustomDataMap): void {
+        let key = '';
+        let value = '';
+        const nodeAny = node as any;
+        for (let i = 0, cn = nodeAny.childNodes, len = cn.length; i < len; i++) {
+            const childNode = (cn[i] as any);
             switch (childNode.tagName) {
                 case XmlNames.Elem.Key:
-                    key = XmlUtils.getText(childNode);
+                    key = XmlUtils.getText(childNode) || '';
                     break;
                 case XmlNames.Elem.Value:
-                    value = XmlUtils.getText(childNode);
-                    break;
-                case XmlNames.Elem.LastModTime:
-                    lastModified = XmlUtils.getDate(childNode);
+                    value = XmlUtils.getText(childNode) || '';
                     break;
             }
         }
-        if (key && value !== undefined) {
-            const item: KdbxCustomDataItem = { value };
-            if (lastModified) {
-                item.lastModified = lastModified;
-            }
-            customData.set(key, item);
+        if (key) {
+            customData.set(key, { value });
         }
     }
 }
