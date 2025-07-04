@@ -1,4 +1,5 @@
-import { gzipSync, gunzipSync } from 'fflate';
+// @ts-ignore
+import { gzipSync, gunzipSync } from '../fflate/fflate.js';
 import { Kdbx } from './kdbx';
 import { CipherId, CompressionAlgorithm, ErrorCodes } from '../defs/consts';
 import { KdbxError } from '../errors/kdbx-error';

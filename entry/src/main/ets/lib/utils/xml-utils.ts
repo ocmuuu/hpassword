@@ -1,4 +1,5 @@
-import { gunzipSync } from 'fflate';
+// @ts-ignore
+import { gunzipSync } from '../fflate/fflate.js';
 import { KdbxError } from '../errors/kdbx-error';
 import { ErrorCodes } from '../defs/consts';
 import * as XmlNames from '../defs/xml-names';
