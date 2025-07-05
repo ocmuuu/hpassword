@@ -4,7 +4,10 @@ import {
   GroupCreateParams, 
   GroupUpdateParams, 
   OperationResult,
-  DatabaseEventType 
+  DatabaseEventType,
+  GroupInfo,
+  LogParams,
+  EventData
 } from './KdbxTypes';
 import { 
   isValidGroupName,
@@ -13,20 +16,32 @@ import {
   logOperation,
   logError 
 } from './KdbxUtils';
+import { KdbxCoreManager } from '../utils/KdbxCore'
 
 const TAG = 'KdbxGroupManager';
+
+// 空实现占位，ArkTS限制无法安全设置内部字段
+// KDBX在保存时会序列化内存树，因此无需手动设置 modified 标志
+
+/**
+ * 组内容统计接口
+ */
+interface GroupContentStats {
+  entries: number;
+  groups: number;
+}
 
 /**
  * KDBX组管理类
  */
 export class KdbxGroupManager {
   private database: Kdbx | null = null;
-  private onEvent?: (eventType: DatabaseEventType, data?: any) => void;
+  private onEvent?: (eventType: DatabaseEventType, data?: EventData) => void;
 
   /**
    * 构造函数
    */
-  constructor(database?: Kdbx, onEvent?: (eventType: DatabaseEventType, data?: any) => void) {
+  constructor(database?: Kdbx, onEvent?: (eventType: DatabaseEventType, data?: EventData) => void) {
     this.database = database || null;
     this.onEvent = onEvent;
   }
@@ -41,7 +56,7 @@ export class KdbxGroupManager {
   /**
    * 设置事件回调
    */
-  setEventCallback(onEvent: (eventType: DatabaseEventType, data?: any) => void): void {
+  setEventCallback(onEvent: (eventType: DatabaseEventType, data?: EventData) => void): void {
     this.onEvent = onEvent;
   }
 
@@ -108,6 +123,9 @@ export class KdbxGroupManager {
         group.notes = cleanText(params.notes);
       }
 
+      // 标记数据库已修改
+      this.markModified();
+
       // 更新时间戳
       if (group.times) {
         const now = new Date();
@@ -120,12 +138,12 @@ export class KdbxGroupManager {
 
       // 触发事件
       if (this.onEvent) {
-        this.onEvent(DatabaseEventType.GROUP_CREATED, {
+        const eventData: EventData = {
           groupId: group.uuid.id,
           name: params.name,
-          parentGroupId: parentGroup.uuid.id,
-          path: getGroupPath(group)
-        });
+          parentGroupId: parentGroup.uuid.id
+        };
+        this.onEvent(DatabaseEventType.GROUP_CREATED, eventData);
       }
 
       return {
@@ -187,6 +205,9 @@ export class KdbxGroupManager {
         group.name = cleanText(params.name);
       }
 
+      // 标记数据库已修改
+      this.markModified();
+
       if (params.notes !== undefined) {
         group.notes = cleanText(params.notes);
       }
@@ -200,11 +221,12 @@ export class KdbxGroupManager {
 
       // 触发事件
       if (this.onEvent) {
-        this.onEvent(DatabaseEventType.GROUP_UPDATED, {
+        const eventData: EventData = {
           groupId: group.uuid.id,
           changes: Object.keys(params),
           path: getGroupPath(group)
-        });
+        };
+        this.onEvent(DatabaseEventType.GROUP_UPDATED, eventData);
       }
 
       return {
@@ -281,11 +303,12 @@ export class KdbxGroupManager {
 
       // 触发事件
       if (this.onEvent) {
-        this.onEvent(DatabaseEventType.GROUP_DELETED, {
+        const eventData: EventData = {
           groupId: group.uuid.id,
-          name: group.name,
+          name: group.name || '',
           parentGroupId: parentGroup.uuid.id
-        });
+        };
+        this.onEvent(DatabaseEventType.GROUP_DELETED, eventData);
       }
 
       return {
@@ -354,16 +377,20 @@ export class KdbxGroupManager {
       hilog.info(0, TAG, '组递归删除成功: %{public}s (包含 %{public}d 个条目, %{public}d 个子组)', 
         group.uuid.id, stats.entries, stats.groups - 1);
 
+      // 标记数据库已修改
+      this.markModified();
+
       // 触发事件
       if (this.onEvent) {
-        this.onEvent(DatabaseEventType.GROUP_DELETED, {
+        const eventData: EventData = {
           groupId: group.uuid.id,
-          name: group.name,
+          name: group.name || '',
           parentGroupId: parentGroup.uuid.id,
           recursive: true,
           deletedEntries: stats.entries,
           deletedGroups: stats.groups
-        });
+        };
+        this.onEvent(DatabaseEventType.GROUP_DELETED, eventData);
       }
 
       return {
@@ -393,9 +420,9 @@ export class KdbxGroupManager {
         };
       }
 
-      logOperation('moveGroup', { 
-        groupId: group.uuid.id, 
-        targetParentGroupId: targetParentGroup.uuid.id 
+      logOperation('moveGroup', {
+        groupId: group.uuid.id,
+        targetParentGroupId: targetParentGroup.uuid.id
       });
 
       // 检查是否是根组
@@ -433,7 +460,7 @@ export class KdbxGroupManager {
       }
 
       // 检查目标父组中是否已有同名组
-      const existingGroup = this.findChildGroupByName(targetParentGroup, group.name);
+      const existingGroup = this.findChildGroupByName(targetParentGroup, group.name || '');
       if (existingGroup) {
         return {
           success: false,
@@ -467,13 +494,14 @@ export class KdbxGroupManager {
 
       // 触发事件
       if (this.onEvent) {
-        this.onEvent(DatabaseEventType.GROUP_UPDATED, {
+        const eventData: EventData = {
           groupId: group.uuid.id,
           action: 'moved',
           fromParentGroupId: currentParentGroup.uuid.id,
           toParentGroupId: targetParentGroup.uuid.id,
           newPath: getGroupPath(group)
-        });
+        };
+        this.onEvent(DatabaseEventType.GROUP_UPDATED, eventData);
       }
 
       return {
@@ -488,6 +516,87 @@ export class KdbxGroupManager {
         errorCode: 'MOVE_ERROR'
       };
     }
+  }
+
+  /**
+   * 获取指定组的子组
+   */
+  getSubGroups(groupId: string): OperationResult<GroupInfo[]> {
+    try {
+      if (!this.database) {
+        return {
+          success: false,
+          error: '数据库未设置',
+          errorCode: 'DATABASE_NOT_SET'
+        };
+      }
+
+      const rootGroup = this.database.getDefaultGroup();
+      if (!rootGroup) {
+        return {
+          success: false,
+          error: '根组不存在',
+          errorCode: 'ROOT_GROUP_NOT_FOUND'
+        };
+      }
+
+      // 查找指定组
+      const targetGroup = this.findGroupById(rootGroup, groupId);
+      if (!targetGroup) {
+        return {
+          success: false,
+          error: '组不存在',
+          errorCode: 'GROUP_NOT_FOUND'
+        };
+      }
+
+      // 转换子组为GroupInfo
+      const groupInfos: GroupInfo[] = [];
+      for (let i = 0; i < targetGroup.groups.length; i++) {
+        const subGroup = targetGroup.groups[i];
+        const groupInfo: GroupInfo = {
+          id: subGroup.uuid.id,
+          name: subGroup.name || '未命名组',
+          path: getGroupPath(subGroup),
+          entryCount: subGroup.entries.length,
+          subGroupCount: subGroup.groups.length,
+          parentGroupId: targetGroup.uuid.id,
+          notes: subGroup.notes || undefined,
+          creationTime: subGroup.times?.creationTime || undefined,
+          lastModTime: subGroup.times?.lastModTime || undefined
+        };
+        groupInfos.push(groupInfo);
+      }
+
+      return {
+        success: true,
+        data: groupInfos
+      };
+
+    } catch (error) {
+      logError('getSubGroups', error as Error);
+      return {
+        success: false,
+        error: (error as Error).message,
+        errorCode: 'GET_SUB_GROUPS_ERROR'
+      };
+    }
+  }
+
+  /**
+   * 根据ID查找组
+   */
+  private findGroupById(group: KdbxGroup, groupId: string): KdbxGroup | null {
+    if (group.uuid.id === groupId) {
+      return group;
+    }
+
+    for (let i = 0; i < group.groups.length; i++) {
+      const found = this.findGroupById(group.groups[i], groupId);
+      if (found) return found;
+    }
+
+    return null;
   }
 
   /**
@@ -560,14 +669,15 @@ export class KdbxGroupManager {
 
       // 触发事件
       if (this.onEvent) {
-        this.onEvent(DatabaseEventType.GROUP_CREATED, {
+        const eventData: EventData = {
           groupId: newGroup.uuid.id,
           action: 'copied',
           sourceGroupId: group.uuid.id,
           name: newName,
           parentGroupId: parentGroup.uuid.id,
           path: getGroupPath(newGroup)
-        });
+        };
+        this.onEvent(DatabaseEventType.GROUP_CREATED, eventData);
       }
 
       return {
@@ -607,7 +717,7 @@ export class KdbxGroupManager {
       if (current === group) {
         return true;
       }
-      current = current.parentGroup;
+      current = current.parentGroup || null;
     }
     return false;
   }
@@ -615,7 +725,7 @@ export class KdbxGroupManager {
   /**
    * 统计组内容
    */
-  private countGroupContents(group: KdbxGroup): { entries: number; groups: number } {
+  private countGroupContents(group: KdbxGroup): GroupContentStats {
     let entries = group.entries.length;
     let groups = 1; // 当前组
 
@@ -681,6 +791,20 @@ export class KdbxGroupManager {
         }
         this.copyGroupContents(sourceChildGroup, newChildGroup);
       }
+    }
+  }
+
+  /**
+   * 标记数据库已修改
+   */
+  private markModified(): void {
+    if (!this.database) {
+      return;
+    }
+    // 通过更新数据库元数据中的 settingsChanged 字段来安全地标记数据库已修改
+    if (this.database.meta) {
+      this.database.meta.settingsChanged = new Date();
+      this.database.meta.headerHash = undefined; // 触发完整序列化
     }
   }
 }

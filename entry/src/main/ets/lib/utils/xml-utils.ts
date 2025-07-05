@@ -179,8 +179,18 @@ export function getText(node: Node | null): string | undefined {
     return node.protectedValue ? node.protectedValue.getText() : (nodeAny.textContent ?? undefined);
 }
 
+// HarmonyOS Ace DOM的 textContent 赋值在某些版本上可能失效，导致序列化时节点内容为空。
+// 为提高兼容性，这里改为显式创建 Text 节点写入，并在写入前清空所有子节点。
 export function setText(node: Node, text: string | undefined): void {
-    (node as any).textContent = text || '';
+  const parentAny: any = node as any;
+  // 直接清空内容（兼容不同DOM实现）
+  parentAny.textContent = '';
+
+  if (text !== undefined && text !== null && text !== '') {
+    const docAny: any = parentAny.ownerDocument || parentAny;
+    const textNode: any = (docAny as any).createTextNode(String(text));
+    parentAny.appendChild(textNode);
+  }
 }
 
 export function getTags(node: Node): string[] {

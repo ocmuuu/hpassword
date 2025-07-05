@@ -4,7 +4,10 @@ import {
   EntryCreateParams, 
   EntryUpdateParams, 
   OperationResult,
-  DatabaseEventType 
+  DatabaseEventType,
+  EntryInfo,
+  LogParams,
+  EventData
 } from './KdbxTypes';
 import { 
   setEntryField,
@@ -12,22 +15,25 @@ import {
   isValidEntryTitle,
   cleanText,
   logOperation,
-  logError 
+  logError,
+  getGroupPath
 } from './KdbxUtils';
 
 const TAG = 'KdbxEntryManager';
+
+// ArkTS 限制：不直接修改内部 private 字段
 
 /**
  * KDBX条目管理类
  */
 export class KdbxEntryManager {
   private database: Kdbx | null = null;
-  private onEvent?: (eventType: DatabaseEventType, data?: any) => void;
+  private onEvent?: (eventType: DatabaseEventType, data?: EventData) => void;
 
   /**
    * 构造函数
    */
-  constructor(database?: Kdbx, onEvent?: (eventType: DatabaseEventType, data?: any) => void) {
+  constructor(database?: Kdbx, onEvent?: (eventType: DatabaseEventType, data?: EventData) => void) {
     this.database = database || null;
     this.onEvent = onEvent;
   }
@@ -42,7 +48,7 @@ export class KdbxEntryManager {
   /**
    * 设置事件回调
    */
-  setEventCallback(onEvent: (eventType: DatabaseEventType, data?: any) => void): void {
+  setEventCallback(onEvent: (eventType: DatabaseEventType, data?: EventData) => void): void {
     this.onEvent = onEvent;
   }
 
@@ -104,15 +110,19 @@ export class KdbxEntryManager {
         entry.times.lastAccessTime = now;
       }
 
+      // 标记数据库已修改
+      this.markModified();
+
       hilog.info(0, TAG, '条目创建成功: %{public}s', params.title);
 
       // 触发事件
       if (this.onEvent) {
-        this.onEvent(DatabaseEventType.ENTRY_CREATED, {
+        const eventData: EventData = {
           entryId: entry.uuid.id,
           title: params.title,
           groupId: parentGroup.uuid.id
-        });
+        };
+        this.onEvent(DatabaseEventType.ENTRY_CREATED, eventData);
       }
 
       return {
@@ -162,14 +172,18 @@ export class KdbxEntryManager {
         entry.times.lastModTime = new Date();
       }
 
+      // 标记数据库已修改
+      this.markModified();
+
       hilog.info(0, TAG, '条目更新成功: %{public}s', entry.uuid.id);
 
       // 触发事件
       if (this.onEvent) {
-        this.onEvent(DatabaseEventType.ENTRY_UPDATED, {
+        const eventData: EventData = {
           entryId: entry.uuid.id,
           changes: Object.keys(params)
-        });
+        };
+        this.onEvent(DatabaseEventType.ENTRY_UPDATED, eventData);
       }
 
       return {
@@ -223,15 +237,19 @@ export class KdbxEntryManager {
 
       parentGroup.entries.splice(entryIndex, 1);
 
+      // 标记数据库已修改
+      this.markModified();
+
       hilog.info(0, TAG, '条目删除成功: %{public}s', entry.uuid.id);
 
       // 触发事件
       if (this.onEvent) {
-        this.onEvent(DatabaseEventType.ENTRY_DELETED, {
+        const eventData: EventData = {
           entryId: entry.uuid.id,
           title: getEntryDisplayText(entry, 'Title'),
           groupId: parentGroup.uuid.id
-        });
+        };
+        this.onEvent(DatabaseEventType.ENTRY_DELETED, eventData);
       }
 
       return {
@@ -261,9 +279,9 @@ export class KdbxEntryManager {
         };
       }
 
-      logOperation('moveEntry', { 
-        entryId: entry.uuid.id, 
-        targetGroupId: targetGroup.uuid.id 
+      logOperation('moveEntry', {
+        entryId: entry.uuid.id,
+        targetGroupId: targetGroup.uuid.id
       });
 
       const currentGroup = entry.parentGroup;
@@ -306,12 +324,13 @@ export class KdbxEntryManager {
 
       // 触发事件
       if (this.onEvent) {
-        this.onEvent(DatabaseEventType.ENTRY_UPDATED, {
+        const eventData: EventData = {
           entryId: entry.uuid.id,
           action: 'moved',
           fromGroupId: currentGroup.uuid.id,
           toGroupId: targetGroup.uuid.id
-        });
+        };
+        this.onEvent(DatabaseEventType.ENTRY_UPDATED, eventData);
       }
 
       return {
@@ -326,6 +345,115 @@ export class KdbxEntryManager {
         errorCode: 'MOVE_ERROR'
       };
     }
+  }
+
+  /**
+   * 获取指定组的条目
+   */
+  getEntriesInGroup(groupId: string): OperationResult<EntryInfo[]> {
+    try {
+      if (!this.database) {
+        return {
+          success: false,
+          error: '数据库未设置',
+          errorCode: 'DATABASE_NOT_SET'
+        };
+      }
+
+      const rootGroup = this.database.getDefaultGroup();
+      if (!rootGroup) {
+        return {
+          success: false,
+          error: '根组不存在',
+          errorCode: 'ROOT_GROUP_NOT_FOUND'
+        };
+      }
+
+      // 查找指定组
+      const targetGroup = this.findGroupById(rootGroup, groupId);
+      if (!targetGroup) {
+        return {
+          success: false,
+          error: '组不存在',
+          errorCode: 'GROUP_NOT_FOUND'
+        };
+      }
+
+      // 转换条目为EntryInfo
+      const entryInfos: EntryInfo[] = [];
+      for (let i = 0; i < targetGroup.entries.length; i++) {
+        const entry = targetGroup.entries[i];
+        const entryInfo: EntryInfo = {
+          id: entry.uuid.id,
+          title: getEntryDisplayText(entry, 'Title') || '未命名条目',
+          username: getEntryDisplayText(entry, 'UserName') || undefined,
+          password: getEntryDisplayText(entry, 'Password') || undefined,
+          url: getEntryDisplayText(entry, 'URL') || undefined,
+          notes: getEntryDisplayText(entry, 'Notes') || undefined,
+          groupId: targetGroup.uuid.id,
+          groupPath: getGroupPath(targetGroup),
+          hasPassword: !!entry.fields.get('Password'),
+          customFields: this.getCustomFields(entry),
+          creationTime: entry.times?.creationTime || undefined,
+          lastModTime: entry.times?.lastModTime || undefined,
+          lastAccessTime: entry.times?.lastAccessTime || undefined
+        };
+        entryInfos.push(entryInfo);
+      }
+
+      return {
+        success: true,
+        data: entryInfos
+      };
+
+    } catch (error) {
+      logError('getEntriesInGroup', error as Error);
+      return {
+        success: false,
+        error: (error as Error).message,
+        errorCode: 'GET_ENTRIES_IN_GROUP_ERROR'
+      };
+    }
+  }
+
+  /**
+   * 根据ID查找组
+   */
+  private findGroupById(group: KdbxGroup, groupId: string): KdbxGroup | null {
+    if (group.uuid.id === groupId) {
+      return group;
+    }
+
+    for (let i = 0; i < group.groups.length; i++) {
+      const found = this.findGroupById(group.groups[i], groupId);
+      if (found) return found;
+    }
+
+    return null;
+  }
+
+  /**
+   * 获取自定义字段
+   */
+  private getCustomFields(entry: KdbxEntry): Record<string, string> {
+    const customFields: Record<string, string> = {};
+    const standardFields = ['Title', 'UserName', 'Password', 'URL', 'Notes'];
+    
+    const fieldEntries = Array.from(entry.fields.entries());
+    for (let i = 0; i < fieldEntries.length; i++) {
+      const key = fieldEntries[i][0];
+      const value = fieldEntries[i][1];
+      
+      if (!standardFields.includes(key)) {
+        if (value instanceof ProtectedValue) {
+          customFields[key] = value.getText();
+        } else {
+          customFields[key] = value as string;
+        }
+      }
+    }
+    
+    return customFields;
   }
 
   /**
@@ -411,12 +539,13 @@ export class KdbxEntryManager {
 
       // 触发事件
       if (this.onEvent) {
-        this.onEvent(DatabaseEventType.ENTRY_CREATED, {
+        const eventData: EventData = {
           entryId: newEntry.uuid.id,
           action: 'copied',
           sourceEntryId: entry.uuid.id,
           groupId: group.uuid.id
-        });
+        };
+        this.onEvent(DatabaseEventType.ENTRY_CREATED, eventData);
       }
 
       return {
@@ -519,6 +648,19 @@ export class KdbxEntryManager {
           entry.fields.set(key, cleanText(value as string));
         }
       }
+    }
+  }
+
+  /**
+   * 标记数据库已修改
+   */
+  private markModified(): void {
+    if (!this.database) {
+      return;
+    }
+    if (this.database.meta) {
+      this.database.meta.settingsChanged = new Date();
+      this.database.meta.headerHash = undefined; // 触发完整序列化
     }
   }
 }

@@ -37,11 +37,21 @@ export class DatabaseFileManager {
 
       const filePath = this.getFilePath(fileName);
       
-      // 检查文件是否存在
+      // 使用和启动时相同的检测逻辑
       try {
         await fs.access(filePath);
-        return true;
-      } catch {
+        
+        // 尝试获取文件信息以确认文件有效
+        try {
+          const stat = await fs.stat(filePath);
+          
+          // 只有文件大小大于0才认为是有效的数据库文件
+          return stat.size > 0;
+        } catch (statError) {
+          // access成功但stat失败，认为文件不存在
+          return false;
+        }
+      } catch (accessError) {
         return false;
       }
     } catch (error) {
@@ -67,6 +77,14 @@ export class DatabaseFileManager {
 
       // 保存数据库为ArrayBuffer
       const arrayBuffer = await database.save();
+
+      // 调试：生成并打印可读XML，帮助定位持久化问题（仅debug日志输出）
+      try {
+        const xmlStr: string = await database.saveXml(true);
+        hilog.debug(0, TAG, '保存的XML:\n%{public}s', xmlStr);
+      } catch (xmlErr) {
+        hilog.error(0, TAG, '生成XML失败: %{public}s', (xmlErr as Error).message);
+      }
       
       // 写入文件
       const filePath = this.getFilePath(fileName);

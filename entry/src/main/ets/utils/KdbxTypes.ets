@@ -266,4 +266,121 @@ export interface FileInfo {
   isDirectory: boolean;
 }
 
+/**
+ * 条目搜索结果 - 为了兼容性保留EntrySearchResult别名
+ */
+export interface EntrySearchResult {
+  entry: KdbxEntry;
+  group: KdbxGroup;
+  matchedFields: string[];
+}
+
+/**
+ * 组信息
+ */
+export interface GroupInfo {
+  id: string;
+  name: string;
+  path: string;
+  entryCount: number;
+  subGroupCount: number;
+  parentGroupId?: string;
+  notes?: string;
+  creationTime?: Date;
+  lastModTime?: Date;
+}
+
+/**
+ * 条目信息
+ */
+export interface EntryInfo {
+  id: string;
+  title: string;
+  username?: string;
+  password?: string;
+  url?: string;
+  notes?: string;
+  groupId: string;
+  groupPath: string;
+  hasPassword: boolean;
+  customFields: Record<string, string>;
+  creationTime?: Date;
+  lastModTime?: Date;
+  lastAccessTime?: Date;
+}
+
+/**
+ * 加载rawfile的日志参数
+ */
+export interface LoadFromRawFileLogParams {
+  fileName: string;
+  hasKeyFile: boolean;
+}
+
+/**
+ * 加载buffer的日志参数
+ */
+export interface LoadFromBufferLogParams {
+  size: number;
+}
+
+/**
+ * 加载事件数据
+ */
+export interface LoadEventData {
+  version: string;
+  size: number;
+}
+
+/**
+ * 保存事件数据
+ */
+export interface SaveEventData {
+  size: number;
+}
+
+/**
+ * 通用日志参数接口
+ */
+export interface LogParams {
+  query?: string;
+  title?: string;
+  entryId?: string;
+  groupId?: string;
+  targetGroupId?: string;
+  targetParentGroupId?: string;
+  name?: string;
+  fileName?: string;
+  hasKeyFile?: boolean;
+  size?: number;
+  databaseName?: string;
+  compression?: string;
+  encryptionRounds?: number;
+  backupCount?: number;
+}
+
+/**
+ * 通用事件数据接口
+ */
+export interface EventData {
+  entryId?: string;
+  groupId?: string;
+  title?: string;
+  name?: string;
+  parentGroupId?: string;
+  changes?: string[];
+  action?: string;
+  fromGroupId?: string;
+  toGroupId?: string;
+  fromParentGroupId?: string;
+  toParentGroupId?: string;
+  newPath?: string;
+  sourceEntryId?: string;
+  sourceGroupId?: string;
+  recursive?: boolean;
+  deletedEntries?: number;
+  deletedGroups?: number;
+  path?: string;
+}
+
  

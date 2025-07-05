@@ -2,6 +2,8 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import { router } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
 import { DefaultDatabase } from '../utils/DefaultDatabase';
+import { KdbxCoreManager } from '../utils/KdbxCore';
+import { runDatabaseCRUDTest } from '../test/DatabaseCRUDTest';
 import fs from '@ohos.file.fs';
 
 const TAG = 'IndexPage';
@@ -16,6 +18,7 @@ struct Index {
   @State errorMessage: string = '';
   @State isCreating: boolean = false;
   @State isOpening: boolean = false;
+  @State testResult: string = '';
   
   private defaultDatabase: DefaultDatabase | null = null;
 
@@ -87,6 +90,7 @@ struct Index {
 
     this.isCreating = true;
     this.errorMessage = '';
+    this.testResult = '';
 
     try {
       hilog.info(0, TAG, '开始创建默认数据库...');
@@ -111,12 +115,48 @@ struct Index {
         return;
       }
 
+      // 设置全局KdbxCore实例
+      if (openResult.data) {
+        KdbxCoreManager.getInstance().setCurrentKdbxCore(openResult.data);
+      }
+      
+      // 执行完整的CRUD测试
+      hilog.info(0, TAG, '开始执行数据库CRUD测试...');
+      this.testResult = '正在执行数据库增删改查测试...';
+      
+      const context = getContext() as common.UIAbilityContext;
+      const testSuccess: boolean = await runDatabaseCRUDTest(context, openResult.data, this.password);
+      
+      if (testSuccess) {
+        hilog.info(0, TAG, '数据库CRUD测试全部通过');
+        this.testResult = '✓ 数据库增删改查测试全部通过！';
+        
+        // 额外确保数据保存到默认数据库
+        try {
+          hilog.info(0, TAG, '最终保存测试数据到默认数据库...');
+          const finalSaveResult = await this.defaultDatabase!.saveDatabase(openResult.data);
+          if (finalSaveResult.success) {
+            hilog.info(0, TAG, '测试数据最终保存成功');
+            this.testResult = '✓ 数据库增删改查测试完成，数据已保存！';
+          } else {
+            hilog.error(0, TAG, '测试数据最终保存失败: %{public}s', finalSaveResult.error);
+            this.testResult = '⚠ 测试通过但保存失败，数据可能丢失';
+          }
+        } catch (saveError) {
+          hilog.error(0, TAG, '最终保存时发生异常: %{public}s', (saveError as Error).message);
+          this.testResult = '⚠ 测试通过但保存时出现异常';
+        }
+      } else {
+        hilog.error(0, TAG, '数据库CRUD测试失败');
+        this.testResult = '✗ 数据库增删改查测试失败，请查看日志';
+      }
+      
+      // 等待3秒让用户看到测试结果
+      await new Promise<void>((resolve) => setTimeout(resolve, 3000));
+      
       // 跳转到主界面
       await router.pushUrl({
-        url: 'pages/MainPage',
-        params: {
-          kdbxCore: openResult.data
-        }
+        url: 'pages/MainPage'
       });
 
     } catch (error) {
@@ -155,12 +195,14 @@ struct Index {
 
       hilog.info(0, TAG, '数据库打开成功');
       
+      // 设置全局KdbxCore实例
+      if (result.data) {
+        KdbxCoreManager.getInstance().setCurrentKdbxCore(result.data);
+      }
+      
       // 跳转到主界面
       await router.pushUrl({
-        url: 'pages/MainPage',
-        params: {
-          kdbxCore: result.data
-        }
+        url: 'pages/MainPage'
       });
 
     } catch (error) {
@@ -381,17 +423,31 @@ struct Index {
         })
       
       if (this.isCreating) {
-        Row() {
-          LoadingProgress()
-            .width(20)
-            .height(20)
-            .margin({ right: 10 })
+        Column() {
+          Row() {
+            LoadingProgress()
+              .width(20)
+              .height(20)
+              .margin({ right: 10 })
+            
+            Text('正在创建密码库...')
+              .fontSize(14)
+              .fontColor('#666666')
+          }
+          .margin({ top: 20 })
           
-          Text('正在创建密码库...')
-            .fontSize(14)
-            .fontColor('#666666')
+          // 显示测试结果
+          if (this.testResult) {
+            Text(this.testResult)
+              .fontSize(14)
+              .fontColor(this.testResult.includes('✓') ? '#4CAF50' : 
+                         this.testResult.includes('✗') ? '#F44336' : '#666666')
+              .margin({ top: 10 })
+              .textAlign(TextAlign.Center)
+          }
         }
-        .margin({ top: 20 })
+        .width('100%')
+        .alignItems(HorizontalAlign.Center)
       }
     }
     .width('100%')

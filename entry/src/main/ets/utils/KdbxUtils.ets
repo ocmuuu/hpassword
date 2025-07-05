@@ -4,7 +4,8 @@ import {
   PasswordStrength, 
   PasswordGenerateOptions, 
   EntryField,
-  DatabaseStats 
+  DatabaseStats,
+  LogParams
 } from './KdbxTypes';
 
 const TAG = 'KdbxUtils';
@@ -385,7 +386,7 @@ export function generateUuidString(): string {
 /**
  * 记录操作日志
  */
-export function logOperation(operation: string, details?: Record<string, Object>): void {
+export function logOperation(operation: string, details?: LogParams): void {
   hilog.info(0, TAG, '操作: %{public}s', operation);
   if (details) {
     hilog.info(0, TAG, '详情: %{public}s', JSON.stringify(details));
