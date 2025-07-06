@@ -75,6 +75,8 @@ struct MainPage {
   @State private passwordVisible: Set<string> = new Set()  // 记录哪些密码字段是可见的
   @State private sortedFields: string[] = []  // 排序后的字段键列表（保留备用）
   @State private renderFields: RenderField[] = [] // 供 UI 直接渲染的字段数据
+  @State private hoverEntryId: string | null = null  // 鼠标悬停的条目ID
+  @State private hoverFieldKey: string | null = null  // 详情面板悬停字段Key
   
   // 布局状态
   @State private isFirstColumnCollapsed: boolean = false
@@ -286,7 +288,7 @@ struct MainPage {
          
          // 添加时间信息
          const lastModTime = ((entry.times as ESObject).lastModTime as Date) || new Date();
-         fields.set('最后修改时间', this.formatDate(lastModTime));
+         fields.set('修改时间', this.formatDate(lastModTime));
          
          const creationTime = ((entry.times as ESObject).creationTime as Date);
          if (creationTime) {
@@ -557,10 +559,23 @@ struct MainPage {
   }
 
   /**
-   * 返回首页
+   * 返回首页：保存并关闭数据库，跳转到 Index 页面并重置密码输入
    */
-  private onBackToHome() {
-    router.back()
+  private async onBackToHome() {
+    try {
+      // 先尝试保存数据库（忽略保存失败不阻止返回）
+      await this.saveDatabaseToFile();
+    } catch (error) {
+      console.error('MainPage', '返回时保存数据库失败:', error);
+    }
+
+    // 清理当前数据库实例
+    KdbxCoreManager.getInstance().clearCurrentKdbxCore();
+
+    // 使用 replaceUrl 跳转并替换当前页面，避免保留旧页面状态
+    router.replaceUrl({
+      url: 'pages/Index'
+    });
   }
 
   /**
@@ -645,23 +660,11 @@ struct MainPage {
         .alignItems(HorizontalAlign.Start)
       }
       .width('100%')
+      .height(60)
+      .padding({ left: 16, right: 16 })
+      .backgroundColor(this.selectedEntryId === entry.id ? '#f0f7ff' : (this.hoverEntryId === entry.id ? '#f5f5f5' : '#fff'))
       .alignItems(VerticalAlign.Center)
-
-      if (entry.url) {
-        Text(entry.url)
-          .fontSize(12)
-          .fontColor('#999')
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-          .width('100%')
-          .textAlign(TextAlign.Start)
-          .margin({ top: 4 })
-      }
     }
-    .width('100%')
-    .padding({ left: 16, right: 16, top: 12, bottom: 12 })
-    .backgroundColor(this.selectedEntryId === entry.id ? '#f0f7ff' : '#fff')
-    .alignItems(HorizontalAlign.Start)
   }
 
   /**
@@ -740,9 +743,14 @@ struct MainPage {
             ForEach(this.renderFields, (field: RenderField) => {
               this.RenderFieldItem(field)
             }, (field: RenderField) => field.key)
+
+            // 占位符，撑满剩余空间，确保内容靠顶部显示
+            Blank()
+              .layoutWeight(1)
           }
           .width('100%')
           .padding({ left: 20, right: 20, top: 16, bottom: 16 })
+          .justifyContent(FlexAlign.Start)
         }
         .layoutWeight(1)
         .backgroundColor('#fff')
@@ -769,8 +777,9 @@ struct MainPage {
       }
       .width('100%')
       .height('100%')
-      .justifyContent(FlexAlign.Center)
+      .padding({ top: 60 })
       .alignItems(HorizontalAlign.Center)
+      .justifyContent(FlexAlign.Start)
       .backgroundColor('#fff')
     }
   }
@@ -798,14 +807,21 @@ struct MainPage {
           .fontSize(12)
           .backgroundColor('#f0f0f0')
           .fontColor('#007AFF')
-          .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+          .borderRadius(3)
+          .padding({ left: 8, right: 8, top: 2, bottom: 2 })
+          .opacity(this.hoverFieldKey === label ? 1 : 0)
           .onClick(() => {
             // TODO: 实现复制功能
             console.log('复制内容:', value)
           })
       }
       .width('100%')
+      .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+      .backgroundColor(this.hoverFieldKey === label ? '#f5f5f5' : '#fff')
       .alignItems(VerticalAlign.Center)
+      .onHover((isHover: boolean) => {
+        this.hoverFieldKey = isHover ? label : (this.hoverFieldKey === label ? null : this.hoverFieldKey)
+      })
 
       Divider()
         .strokeWidth(1)
@@ -840,8 +856,9 @@ struct MainPage {
           .fontSize(12)
           .backgroundColor('#f0f0f0')
           .fontColor('#007AFF')
-          .padding({ left: 6, right: 6, top: 4, bottom: 4 })
-          .margin({ right: 8 })
+          .borderRadius(3)
+          .padding({ left: 6, right: 6, top: 2, bottom: 2 })
+          .opacity(this.hoverFieldKey === fieldKey ? 1 : 0)
           .onClick(() => {
             // TODO: 实现复制功能
             console.log('复制密码:', value)
@@ -863,7 +880,12 @@ struct MainPage {
           })
       }
       .width('100%')
+      .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+      .backgroundColor(this.hoverFieldKey === fieldKey ? '#f5f5f5' : '#fff')
       .alignItems(VerticalAlign.Center)
+      .onHover((isHover: boolean) => {
+        this.hoverFieldKey = isHover ? fieldKey : (this.hoverFieldKey === fieldKey ? null : this.hoverFieldKey)
+      })
 
       Divider()
         .strokeWidth(1)
@@ -902,25 +924,22 @@ struct MainPage {
           .fontSize(12)
           .backgroundColor('#f0f0f0')
           .fontColor('#007AFF')
-          .padding({ left: 6, right: 6, top: 4, bottom: 4 })
-          .margin({ right: 8 })
+          .borderRadius(3)
+          .padding({ left: 6, right: 6, top: 2, bottom: 2 })
+          .opacity(this.hoverFieldKey === label ? 1 : 0)
           .onClick(() => {
             // TODO: 实现复制功能
             console.log('复制链接:', value)
           })
 
-        Button('打开')
-          .fontSize(12)
-          .backgroundColor('#f0f0f0')
-          .fontColor('#007AFF')
-          .padding({ left: 6, right: 6, top: 4, bottom: 4 })
-          .onClick(() => {
-            // TODO: 实现URL跳转功能
-            console.log('打开链接:', value)
-          })
       }
       .width('100%')
+      .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+      .backgroundColor(this.hoverFieldKey === label ? '#f5f5f5' : '#fff')
       .alignItems(VerticalAlign.Center)
+      .onHover((isHover: boolean) => {
+        this.hoverFieldKey = isHover ? label : (this.hoverFieldKey === label ? null : this.hoverFieldKey)
+      })
 
       Divider()
         .strokeWidth(1)
@@ -1025,27 +1044,8 @@ struct MainPage {
     try {
       const newStarredCount = await this.getStarredEntryCount();
       
-      // 更新fixedSidebarItems中的加星条目数量
-      const starredItemIndex = this.fixedSidebarItems.findIndex(item => item.id === 'starred');
-      if (starredItemIndex !== -1) {
-        const updatedItem = { ...this.fixedSidebarItems[starredItemIndex] };
-        updatedItem.count = newStarredCount;
-        this.fixedSidebarItems[starredItemIndex] = updatedItem;
-        
-        // 触发状态更新
-        this.fixedSidebarItems = [...this.fixedSidebarItems];
-      }
-      
-      // 也更新sidebarItems中的数量（保持一致性）
-      const allStarredItemIndex = this.sidebarItems.findIndex(item => item.id === 'starred');
-      if (allStarredItemIndex !== -1) {
-        const updatedAllItem = { ...this.sidebarItems[allStarredItemIndex] };
-        updatedAllItem.count = newStarredCount;
-        this.sidebarItems[allStarredItemIndex] = updatedAllItem;
-        
-        // 触发状态更新
-        this.sidebarItems = [...this.sidebarItems];
-      }
+      // 直接重新构建侧边栏数据，确保 UI 计数立即刷新
+      await this.initializeSidebarItems();
       
     } catch (error) {
       console.error('MainPage', '更新加星数量失败:', error);
@@ -1243,6 +1243,9 @@ struct MainPage {
                 }
                 .onClick(() => {
                   this.onEntryItemClick(entry)
+                })
+                .onHover((isHover: boolean) => {
+                  this.hoverEntryId = isHover ? entry.id : (this.hoverEntryId === entry.id ? null : this.hoverEntryId)
                 })
               }, (entry: EntryItem) => entry.id)
             }
