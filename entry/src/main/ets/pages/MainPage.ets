@@ -5,6 +5,15 @@ import { KdbxEntryManager } from '../utils/KdbxEntryManager'
 import { KdbxGroupManager } from '../utils/KdbxGroupManager'
 // 移除对 kdbxweb 的依赖，使用内置类型兼容
 import PreferencesUtil from '../utils/PreferencesUtil'
+import { 
+  LoginTemplate, SecureNoteTemplate, BankAccountTemplate, PaymentAccountTemplate,
+  SecuritiesFundTemplate, EmailAccountTemplate, MembershipCardTemplate, SubscriptionTemplate,
+  AddressBookTemplate, FamilyTemplate, CertificateTemplate, InsurancePolicyTemplate,
+  UtilityAccountTemplate, MedicalRecordTemplate, LoyaltyProgramTemplate, KeyCertificateTemplate,
+  ServerTemplate, DatabaseTemplate, IoTDeviceTemplate, VehicleInfoTemplate,
+  RouterTemplate, ApiCredentialTemplate, SoftwareLicenseTemplate, CryptoWalletTemplate,
+  OtherTemplate
+} from '../templates/index'
 
 // 侧边栏项目类型
 interface SidebarItem {
@@ -14,6 +23,20 @@ interface SidebarItem {
   type: 'special' | 'group' | 'recycle' | 'divider'
   count?: number
   parentId?: string
+}
+
+// 字段信息类型
+interface FieldInfo {
+  label: string
+  isProtected: boolean
+}
+
+// 渲染字段信息，在 UI 构建阶段只做纯渲染
+interface RenderField {
+  key: string
+  label: string
+  value: string
+  type: 'password' | 'url' | 'text'
 }
 
 // 条目项目类型
@@ -26,6 +49,8 @@ interface EntryItem {
   icon: Resource
   lastModified: string
   groupId?: string
+  groupName?: string  // 添加组名信息，用于获取模板
+  fields?: Map<string, string>  // 存储所有字段的键值对
 }
 
 @Entry
@@ -44,6 +69,9 @@ struct MainPage {
   @State private selectedSidebarId: string | null = null
   @State private selectedEntryId: string | null = null
   @State private selectedEntry: EntryItem | null = null
+  @State private passwordVisible: Set<string> = new Set()  // 记录哪些密码字段是可见的
+  @State private sortedFields: string[] = []  // 排序后的字段键列表（保留备用）
+  @State private renderFields: RenderField[] = [] // 供 UI 直接渲染的字段数据
   
   // 布局状态
   @State private isFirstColumnCollapsed: boolean = false
@@ -238,15 +266,37 @@ struct MainPage {
              // 转换为UI显示格式
        const mappedItems: EntryItem[] = entries.map(entryRaw => {
          const entry: ESObject = entryRaw as ESObject;
+         const entryFields = entry.fields as Map<string, Object>;
+         
+         // 提取所有字段
+         const fields = new Map<string, string>();
+         entryFields.forEach((value, key) => {
+           const fieldValue = this.getFieldValue(entryFields, key);
+           if (fieldValue && fieldValue.trim().length > 0) {
+             fields.set(key, fieldValue);
+           }
+         });
+         
+         // 添加时间信息
+         const lastModTime = ((entry.times as ESObject).lastModTime as Date) || new Date();
+         fields.set('最后修改时间', this.formatDate(lastModTime));
+         
+         const creationTime = ((entry.times as ESObject).creationTime as Date);
+         if (creationTime) {
+           fields.set('创建时间', this.formatDate(creationTime));
+         }
+         
          return ({
            id: (entry.uuid as ESObject).id as string,
-           title: this.getFieldValue((entry.fields as Map<string, Object>), 'Title') || '无标题',
-           username: this.getFieldValue((entry.fields as Map<string, Object>), 'UserName') || '',
-           notes: this.getFieldValue((entry.fields as Map<string, Object>), 'Notes') || '',
-           url: this.getFieldValue((entry.fields as Map<string, Object>), 'URL') || '',
+           title: this.getFieldValue(entryFields, 'Title') || '无标题',
+           username: this.getFieldValue(entryFields, 'UserName') || '',
+           notes: this.getFieldValue(entryFields, 'Notes') || '',
+           url: this.getFieldValue(entryFields, 'URL') || '',
            icon: $r('app.media.startIcon'),
-           lastModified: this.formatDate(((entry.times as ESObject).lastModTime as Date) || new Date()),
-           groupId: entry.parentGroup ? ((entry.parentGroup as ESObject).uuid as ESObject).id as string : ''
+           lastModified: this.formatDate(lastModTime),
+           groupId: entry.parentGroup ? ((entry.parentGroup as ESObject).uuid as ESObject).id as string : '',
+           groupName: entry.parentGroup ? ((entry.parentGroup as ESObject).name as string) : '',
+           fields: fields
          }) as EntryItem;
        })
        this.entryItems = mappedItems
@@ -314,6 +364,136 @@ struct MainPage {
   }
 
   /**
+   * 根据组名获取对应的模板
+   */
+  private getTemplateByGroupName(groupName: string) {
+    // 导入所有模板
+    const templates = [
+      LoginTemplate, SecureNoteTemplate, BankAccountTemplate, PaymentAccountTemplate,
+      SecuritiesFundTemplate, EmailAccountTemplate, MembershipCardTemplate, SubscriptionTemplate,
+      AddressBookTemplate, FamilyTemplate, CertificateTemplate, InsurancePolicyTemplate,
+      UtilityAccountTemplate, MedicalRecordTemplate, LoyaltyProgramTemplate, KeyCertificateTemplate,
+      ServerTemplate, DatabaseTemplate, IoTDeviceTemplate, VehicleInfoTemplate,
+      RouterTemplate, ApiCredentialTemplate, SoftwareLicenseTemplate, CryptoWalletTemplate,
+      OtherTemplate
+    ];
+    
+    return templates.find(template => template.name === groupName);
+  }
+
+  /**
+   * 获取字段的显示信息（标签和是否敏感）
+   */
+  private getFieldInfo(fieldKey: string, groupName?: string): FieldInfo {
+    // 特殊处理时间字段
+    if (fieldKey === '最后修改时间' || fieldKey === '创建时间') {
+      return { label: fieldKey, isProtected: false };
+    }
+    
+    // 尝试从模板中获取字段信息
+    if (groupName) {
+      const template = this.getTemplateByGroupName(groupName);
+      if (template) {
+        const fieldSpec = template.fields.find(field => field.key === fieldKey);
+        if (fieldSpec) {
+          return { 
+            label: fieldSpec.label, 
+            isProtected: fieldSpec.protected === true 
+          };
+        }
+      }
+    }
+    
+    // 通用字段名称映射（用于用户自定义字段或未匹配的字段）
+    const commonFieldNames: Record<string, string> = {
+      'Title': '标题',
+      'UserName': '用户名',
+      'Password': '密码',
+      'URL': '网址',
+      'Notes': '备注'
+    };
+    
+    // 通过关键词判断是否为敏感字段
+    const sensitiveKeywords = ['password', 'pwd', 'key', 'secret', 'token', 'seed', 'private', 'cvv', 'pin'];
+    const isProtected = sensitiveKeywords.some(keyword => 
+      fieldKey.toLowerCase().includes(keyword.toLowerCase())
+    );
+    
+    return {
+      label: commonFieldNames[fieldKey] || fieldKey,
+      isProtected
+    };
+  }
+
+  /**
+   * 处理字段排序逻辑
+   */
+  private processSortedFields() {
+    if (!this.selectedEntry?.fields) {
+      this.sortedFields = [];
+      return;
+    }
+
+    // 获取所有有值的字段
+    const allFields: string[] = [];
+    this.selectedEntry.fields.forEach((value, key) => {
+      if (value && value.trim().length > 0) {
+        allFields.push(key);
+      }
+    });
+
+    // 定义优先显示的字段顺序
+    const priorityFields = [
+      'Title', 'UserName', 'Password', 'URL', 'Email', 'Phone',
+      'PayPassword', 'FundPassword', 'BankName', 'AccountNumber', 
+      'CardNumber', 'ExpiryDate', 'CVV',
+      'Host', 'Port', 'DBName', 'Protocol', 
+      'Address', 'Seed', 'PrivateKey',
+      'Company', 'Department', 'JobTitle', 'Website',
+      'API_Key', 'SecretKey', 'AccessToken', 'RefreshToken',
+      'License', 'SerialNumber', 'ActivationCode',
+      'TOTP', 'Notes', '创建时间', '最后修改时间'
+    ];
+
+    // 按优先级排序字段
+    this.sortedFields = allFields.sort((a, b) => {
+      const aIndex = priorityFields.indexOf(a);
+      const bIndex = priorityFields.indexOf(b);
+      
+      if (aIndex === -1 && bIndex === -1) return a.localeCompare(b);
+      if (aIndex === -1) return 1;
+      if (bIndex === -1) return -1;
+      return aIndex - bIndex;
+    });
+
+    // 生成 renderFields 供 UI 渲染，避免在 build 方法里写逻辑
+    const newRenderFields: RenderField[] = [];
+    this.sortedFields.forEach(key => {
+      const value = this.selectedEntry!.fields!.get(key) as string | undefined;
+      if (!value || value.trim().length === 0) {
+        return;
+      }
+
+      const fieldInfo: FieldInfo = this.getFieldInfo(key, this.selectedEntry!.groupName);
+      let type: 'password' | 'url' | 'text' = 'text';
+      if (fieldInfo.isProtected) {
+        type = 'password';
+      } else if (key === 'URL' || key === 'Website') {
+        type = 'url';
+      }
+
+      newRenderFields.push({
+        key,
+        label: fieldInfo.label,
+        value,
+        type
+      });
+    });
+
+    this.renderFields = newRenderFields;
+  }
+
+  /**
    * 侧边栏项目点击处理
    */
   private async onSidebarItemClick(item: SidebarItem) {
@@ -341,6 +521,10 @@ struct MainPage {
   private onEntryItemClick(entry: EntryItem) {
     this.selectedEntryId = entry.id
     this.selectedEntry = entry
+    // 重置密码可见性状态
+    this.passwordVisible = new Set()
+    // 处理字段排序
+    this.processSortedFields()
   }
 
   /**
@@ -495,23 +679,10 @@ struct MainPage {
         // 详情内容
         Scroll() {
           Column() {
-            // 用户名
-            if (this.selectedEntry.username) {
-              this.DetailFieldView('用户名', this.selectedEntry.username)
-            }
-
-            // 网址
-            if (this.selectedEntry.url) {
-              this.DetailFieldView('网址', this.selectedEntry.url)
-            }
-
-            // 备注
-            if (this.selectedEntry.notes) {
-              this.DetailFieldView('备注', this.selectedEntry.notes)
-            }
-
-            // 最后修改时间
-            this.DetailFieldView('最后修改', this.selectedEntry.lastModified)
+            // 动态显示所有字段
+            ForEach(this.renderFields, (field: RenderField) => {
+              this.RenderFieldItem(field)
+            }, (field: RenderField) => field.key)
           }
           .width('100%')
           .padding({ left: 20, right: 20, top: 16, bottom: 16 })
@@ -565,9 +736,19 @@ struct MainPage {
           .fontColor('#000')
           .layoutWeight(1)
           .textAlign(TextAlign.Start)
+
+        Button('复制')
+          .fontSize(12)
+          .backgroundColor('#f0f0f0')
+          .fontColor('#007AFF')
+          .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+          .onClick(() => {
+            // TODO: 实现复制功能
+            console.log('复制内容:', value)
+          })
       }
       .width('100%')
-      .alignItems(VerticalAlign.Top)
+      .alignItems(VerticalAlign.Center)
 
       Divider()
         .strokeWidth(1)
@@ -577,6 +758,137 @@ struct MainPage {
     .width('100%')
     .alignItems(HorizontalAlign.Start)
   }
+
+  /**
+   * 创建密码字段视图（带显示/隐藏功能）
+   */
+  @Builder
+  private PasswordFieldView(label: string, value: string, fieldKey: string) {
+    Column() {
+      Row() {
+        Text(label)
+          .fontSize(14)
+          .fontColor('#666')
+          .fontWeight(FontWeight.Medium)
+          .width(80)
+
+        Text(this.passwordVisible.has(fieldKey) ? value : '••••••••')
+          .fontSize(14)
+          .fontColor('#000')
+          .layoutWeight(1)
+          .textAlign(TextAlign.Start)
+          .fontFamily('monospace')
+
+        Button('复制')
+          .fontSize(12)
+          .backgroundColor('#f0f0f0')
+          .fontColor('#007AFF')
+          .padding({ left: 6, right: 6, top: 4, bottom: 4 })
+          .margin({ right: 8 })
+          .onClick(() => {
+            // TODO: 实现复制功能
+            console.log('复制密码:', value)
+          })
+
+        Button(this.passwordVisible.has(fieldKey) ? '隐藏' : '显示')
+          .fontSize(12)
+          .backgroundColor('#f0f0f0')
+          .fontColor('#007AFF')
+          .padding({ left: 6, right: 6, top: 4, bottom: 4 })
+          .onClick(() => {
+            if (this.passwordVisible.has(fieldKey)) {
+              this.passwordVisible.delete(fieldKey);
+            } else {
+              this.passwordVisible.add(fieldKey);
+            }
+            // 触发状态更新
+            this.passwordVisible = new Set(this.passwordVisible);
+          })
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+
+      Divider()
+        .strokeWidth(1)
+        .color('#f0f0f0')
+        .margin({ top: 12, bottom: 12 })
+    }
+    .width('100%')
+    .alignItems(HorizontalAlign.Start)
+  }
+
+  /**
+   * 创建URL字段视图（带点击跳转功能）
+   */
+  @Builder
+  private URLFieldView(label: string, value: string) {
+    Column() {
+      Row() {
+        Text(label)
+          .fontSize(14)
+          .fontColor('#666')
+          .fontWeight(FontWeight.Medium)
+          .width(80)
+
+        Text(value)
+          .fontSize(14)
+          .fontColor('#007AFF')
+          .layoutWeight(1)
+          .textAlign(TextAlign.Start)
+          .decoration({ type: TextDecorationType.Underline })
+          .onClick(() => {
+            // TODO: 实现URL跳转功能
+            console.log('点击链接:', value)
+          })
+
+        Button('复制')
+          .fontSize(12)
+          .backgroundColor('#f0f0f0')
+          .fontColor('#007AFF')
+          .padding({ left: 6, right: 6, top: 4, bottom: 4 })
+          .margin({ right: 8 })
+          .onClick(() => {
+            // TODO: 实现复制功能
+            console.log('复制链接:', value)
+          })
+
+        Button('打开')
+          .fontSize(12)
+          .backgroundColor('#f0f0f0')
+          .fontColor('#007AFF')
+          .padding({ left: 6, right: 6, top: 4, bottom: 4 })
+          .onClick(() => {
+            // TODO: 实现URL跳转功能
+            console.log('打开链接:', value)
+          })
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+
+      Divider()
+        .strokeWidth(1)
+        .color('#f0f0f0')
+        .margin({ top: 12, bottom: 12 })
+    }
+    .width('100%')
+    .alignItems(HorizontalAlign.Start)
+  }
+
+  /**
+   * 渲染单个字段，根据类型选择合适组件
+   */
+  @Builder
+  private RenderFieldItem(field: RenderField) {
+    if (field.type === 'password') {
+      this.PasswordFieldView(field.label, field.value, field.key)
+    } else if (field.type === 'url') {
+      this.URLFieldView(field.label, field.value)
+    } else {
+      this.DetailFieldView(field.label, field.value)
+    }
+  }
+
+  // 已移除 FieldItemView，所有逻辑在 processSortedFields 中完成，UI 只做渲染
 
   build() {
     if (!this.isInitialized) {
