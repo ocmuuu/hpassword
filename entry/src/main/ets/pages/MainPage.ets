@@ -4,7 +4,7 @@ import { KdbxQuery } from '../utils/KdbxQuery'
 import { KdbxEntryManager } from '../utils/KdbxEntryManager'
 import { KdbxGroupManager } from '../utils/KdbxGroupManager'
 import { DatabaseFileManager } from '../utils/DatabaseFileManager'
-import { OperationResult } from '../utils/KdbxTypes'
+import { OperationResult, SearchCriteria } from '../utils/KdbxTypes'
 // 移除对 kdbxweb 的依赖，使用内置类型兼容
 import PreferencesUtil from '../utils/PreferencesUtil'
 import { 
@@ -75,9 +75,12 @@ struct MainPage {
   @State private passwordVisible: Set<string> = new Set()  // 记录哪些密码字段是可见的
   @State private sortedFields: string[] = []  // 排序后的字段键列表（保留备用）
   @State private renderFields: RenderField[] = [] // 供 UI 直接渲染的字段数据
+  @State private updateCounter: number = 0 // 强制更新计数器
   @State private hoverEntryId: string | null = null  // 鼠标悬停的条目ID
   @State private hoverFieldKey: string | null = null  // 详情面板悬停字段Key
   @State private searchQuery: string = ''  // 条目搜索关键字
+  @State private filteredEntryItems: EntryItem[] = []  // 搜索过滤后的条目列表
+  @State private isSearching: boolean = false  // 是否正在搜索状态
   
   // 布局状态
   @State private isFirstColumnCollapsed: boolean = false
@@ -92,6 +95,10 @@ struct MainPage {
   // 自动超时相关
   private autoCloseTimer: number | null = null
   private readonly AUTO_CLOSE_TIMEOUT = 600000  // 10分钟自动关闭
+  
+  // 搜索防抖相关
+  private searchTimer: number | null = null
+  private readonly SEARCH_DEBOUNCE_DELAY = 300  // 搜索防抖延迟300ms
 
   async aboutToAppear() {
     try {
@@ -494,6 +501,9 @@ struct MainPage {
     });
 
     // 生成 renderFields 供 UI 渲染，避免在 build 方法里写逻辑
+    // 创建全新的数组，确保触发响应式更新
+    this.renderFields = [];
+    
     const newRenderFields: RenderField[] = [];
     this.sortedFields.forEach(key => {
       const value = this.selectedEntry!.fields!.get(key) as string | undefined;
@@ -517,6 +527,7 @@ struct MainPage {
       });
     });
 
+    // 立即设置新的 renderFields
     this.renderFields = newRenderFields;
   }
 
@@ -531,6 +542,9 @@ struct MainPage {
     if (item.type === 'divider') {
       return
     }
+    
+    // 清空搜索状态
+    this.clearSearch()
     
     this.selectedSidebarId = item.id
     this.selectedEntryId = null
@@ -549,15 +563,89 @@ struct MainPage {
    * 条目项目点击处理
    */
   private onEntryItemClick(entry: EntryItem) {
-    // 重置自动关闭计时器
-    this.resetAutoCloseTimer()
+    try {
+      // 重置自动关闭计时器
+      this.resetAutoCloseTimer()
+      
+      // 使用通用方法安全地更新选中条目
+      this.updateSelectedEntry(entry)
+      
+      // 如果当前在搜索状态，清除搜索
+      if (this.isSearching) {
+        this.clearSearch()
+        
+        // 如果条目有分组信息，异步切换到对应的分组
+        if (entry.groupId && entry.groupId !== this.selectedSidebarId) {
+          this.selectedSidebarId = entry.groupId
+          // 异步加载分组条目，不等待完成
+          this.loadEntriesForSidebar(entry.groupId).then(() => {
+            // 重新从加载的条目中找到对应的条目（确保数据一致性）
+            const updatedEntry = this.entryItems.find(item => item.id === entry.id)
+            if (updatedEntry) {
+              // 使用通用方法安全地更新选中条目
+              this.updateSelectedEntry(updatedEntry)
+            }
+          }).catch((error: ESObject) => {
+            console.error('MainPage', '加载分组条目失败:', error)
+          })
+        }
+      }
+    } catch (error) {
+      console.error('MainPage', '条目点击处理失败:', error)
+    }
+  }
+  
+  /**
+   * 安全地更新 selectedEntry，确保触发响应式更新
+   */
+  private updateSelectedEntry(entry: EntryItem) {
+    // 递增更新计数器，强制触发响应式更新
+    this.updateCounter++
     
-    this.selectedEntryId = entry.id
-    this.selectedEntry = entry
-    // 重置密码可见性状态
+    // 先完全清空状态，触发UI重新渲染
+    this.selectedEntry = null
+    this.renderFields = []
     this.passwordVisible = new Set()
-    // 处理字段排序
-    this.processSortedFields()
+    
+    // 使用 nextTick 确保状态变化被检测到
+    setTimeout(() => {
+      // 创建新的条目对象，确保所有嵌套对象都是全新的
+      const newFields = new Map<string, string>()
+      if (entry.fields) {
+        entry.fields.forEach((value, key) => {
+          newFields.set(key, value)
+        })
+      }
+      
+      this.selectedEntry = {
+        id: entry.id,
+        title: entry.title,
+        username: entry.username,
+        notes: entry.notes,
+        url: entry.url,
+        icon: entry.icon,
+        lastModified: entry.lastModified,
+        groupId: entry.groupId,
+        groupName: entry.groupName,
+        fields: newFields
+      }
+      this.selectedEntryId = entry.id
+      
+      // 立即处理字段排序
+      this.processSortedFields()
+    }, 1)
+  }
+
+  /**
+   * 强制UI刷新的辅助方法
+   */
+  private forceUIRefresh() {
+    // 通过触发状态变化强制UI重新渲染
+    const temp = this.selectedEntry
+    this.selectedEntry = null
+    setTimeout(() => {
+      this.selectedEntry = temp
+    }, 1)
   }
 
   /**
@@ -655,44 +743,45 @@ struct MainPage {
    */
   @Builder
   private EntryItemView(entry: EntryItem) {
-    Column() {
-      Row() {
-        Image(entry.icon)
-          .width(20)
-          .height(20)
-          .margin({ right: 12 })
-          .fillColor('#666666')
+    Row() {
+      Image(entry.icon)
+        .width(20)
+        .height(20)
+        .margin({ right: 12 })
+        .fillColor('#666666')
 
-        Column() {
-          Text(entry.title)
-            .fontSize(16)
-            .fontWeight(FontWeight.Medium)
-            .fontColor('#000')
+      Column() {
+        Text(entry.title)
+          .fontSize(16)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(this.containsSearchKeyword(entry.title) ? '#007AFF' : '#000')
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .width('100%')
+          .textAlign(TextAlign.Start)
+
+        if (entry.username) {
+          Text(entry.username)
+            .fontSize(14)
+            .fontColor(this.containsSearchKeyword(entry.username) ? '#007AFF' : '#666')
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
             .width('100%')
             .textAlign(TextAlign.Start)
-
-          if (entry.username) {
-            Text(entry.username)
-              .fontSize(14)
-              .fontColor('#666')
-              .maxLines(1)
-              .textOverflow({ overflow: TextOverflow.Ellipsis })
-              .width('100%')
-              .textAlign(TextAlign.Start)
-              .margin({ top: 2 })
-          }
+            .margin({ top: 2 })
         }
-        .layoutWeight(1)
-        .alignItems(HorizontalAlign.Start)
       }
-      .width('100%')
-      .height(60)
-      .padding({ left: 16, right: 16 })
-      .backgroundColor(this.selectedEntryId === entry.id ? '#f0f7ff' : (this.hoverEntryId === entry.id ? '#f5f5f5' : '#fff'))
-      .alignItems(VerticalAlign.Center)
+      .layoutWeight(1)
+      .alignItems(HorizontalAlign.Start)
     }
+    .width('100%')
+    .height(60)
+    .padding({ left: 16, right: 16 })
+    .backgroundColor(this.selectedEntryId === entry.id ? '#f0f7ff' : (this.hoverEntryId === entry.id ? '#f5f5f5' : '#fff'))
+    .alignItems(VerticalAlign.Center)
+    .onClick(() => {
+      this.onEntryItemClick(entry)
+    })
   }
 
   /**
@@ -702,15 +791,15 @@ struct MainPage {
   private DetailPanelView() {
     if (this.selectedEntry) {
       Column() {
-        // 标题栏
-        Row() {
-          Text(this.selectedEntry.title)
-            .fontSize(20)
-            .fontWeight(FontWeight.Bold)
-            .fontColor('#000')
-            .layoutWeight(1)
-            .maxLines(1)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
+                  // 标题栏
+          Row() {
+            Text(this.selectedEntry.title + (this.updateCounter > 0 ? '' : ''))
+              .fontSize(20)
+              .fontWeight(FontWeight.Bold)
+              .fontColor('#000')
+              .layoutWeight(1)
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
 
           // 加星/取消加星按钮
           Button() {
@@ -741,7 +830,10 @@ struct MainPage {
                   // 刷新列表
                   await this.loadEntriesForSidebar(this.selectedSidebarId || 'all_entries');
                   // 更新选中项
-                  this.selectedEntry = this.entryItems.find(item => item.id === this.selectedEntry?.id) || null;
+                  const updatedSelectedEntry = this.entryItems.find(item => item.id === this.selectedEntry?.id);
+                  if (updatedSelectedEntry) {
+                    this.updateSelectedEntry(updatedSelectedEntry);
+                  }
                 }
               }
             }
@@ -820,7 +912,7 @@ struct MainPage {
             // 动态显示所有字段
             ForEach(this.renderFields, (field: RenderField) => {
               this.RenderFieldItem(field)
-            }, (field: RenderField) => field.key)
+            }, (field: RenderField) => field.key + '_' + this.updateCounter)
 
             // 占位符，撑满剩余空间，确保内容靠顶部显示
             Blank()
@@ -1284,21 +1376,43 @@ struct MainPage {
                 this.onToggleFirstColumn()
               })
 
-            // 搜索框
-            TextInput({ placeholder: '搜索条目', text: this.searchQuery })
-              .placeholderColor('#999')
-              .fontSize(14)
-              .border({ width: 1, color: '#ccc' })
-              .borderRadius(4)
-              .padding({ left: 8, right: 8, top: 4, bottom: 4 })
-              .layoutWeight(1)
-              .onChange((value: string) => {
-                // 重置自动关闭计时器
-                this.resetAutoCloseTimer()
-                
-                this.searchQuery = value
-                // TODO: 可在此调用过滤逻辑
-              })
+            // 搜索框容器
+            Row() {
+              TextInput({ placeholder: '搜索条目', text: this.searchQuery })
+                .placeholderColor('#999')
+                .fontSize(14)
+                .border({ width: 1, color: '#ccc' })
+                .borderRadius(4)
+                .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+                .layoutWeight(1)
+                .onChange((value: string) => {
+                  // 重置自动关闭计时器
+                  this.resetAutoCloseTimer()
+                  
+                  this.searchQuery = value
+                  // 执行防抖搜索
+                  this.debounceSearch(value)
+                })
+
+              // 清空搜索按钮
+              if (this.searchQuery) {
+                Button() {
+                  Text('×')
+                    .fontSize(16)
+                    .fontColor('#666')
+                }
+                .backgroundColor('transparent')
+                .padding(4)
+                .margin({ left: 4 })
+                .onClick(() => {
+                  // 重置自动关闭计时器
+                  this.resetAutoCloseTimer()
+                  
+                  this.clearSearch()
+                })
+              }
+            }
+            .layoutWeight(1)
 
             // 新增按钮
             Button() {
@@ -1324,6 +1438,27 @@ struct MainPage {
           .backgroundColor('#f8f9fa')
           .border({ width: { bottom: 1 }, color: '#e0e0e0' })
 
+          // 搜索结果统计
+          if (this.isSearching) {
+            Row() {
+              Text(`搜索结果：${this.filteredEntryItems.length} 个条目`)
+                .fontSize(12)
+                .fontColor('#666')
+                .margin({ left: 16 })
+              
+              Blank()
+              
+              Text(`关键词："${this.searchQuery}"`)
+                .fontSize(12)
+                .fontColor('#007AFF')
+                .margin({ right: 16 })
+            }
+            .width('100%')
+            .height(30)
+            .backgroundColor('#f0f7ff')
+            .alignItems(VerticalAlign.Center)
+          }
+
           // 条目列表
           if (this.isLoading) {
             Column() {
@@ -1336,7 +1471,7 @@ struct MainPage {
             .layoutWeight(1)
             .justifyContent(FlexAlign.Center)
             .backgroundColor('#fff')
-          } else if (this.entryItems.length === 0) {
+          } else if (this.getCurrentDisplayEntries().length === 0) {
             Column() {
               Image($r('app.media.startIcon'))
                 .width(60)
@@ -1344,32 +1479,49 @@ struct MainPage {
                 .opacity(0.3)
                 .margin({ bottom: 12 })
 
-              Text('暂无条目')
+              Text(this.isSearching ? '未找到匹配的条目' : '暂无条目')
                 .fontSize(16)
                 .fontColor('#999')
+                
+              if (this.isSearching) {
+                Text(`搜索"${this.searchQuery}"无结果`)
+                  .fontSize(14)
+                  .fontColor('#ccc')
+                  .margin({ top: 8 })
+              }
             }
             .width('100%')
             .layoutWeight(1)
             .justifyContent(FlexAlign.Center)
             .backgroundColor('#fff')
           } else {
-            List() {
-              ForEach(this.entryItems, (entry: EntryItem) => {
-                ListItem() {
-                  this.EntryItemView(entry)
-                }
-                .onClick(() => {
-                  this.onEntryItemClick(entry)
-                })
-                .onHover((isHover: boolean) => {
-                  this.hoverEntryId = isHover ? entry.id : (this.hoverEntryId === entry.id ? null : this.hoverEntryId)
-                })
-              }, (entry: EntryItem) => entry.id)
+            Scroll() {
+              Column() {
+                ForEach(this.getCurrentDisplayEntries(), (entry: EntryItem) => {
+                  Column() {
+                    this.EntryItemView(entry)
+                    
+                    // 分割线
+                    if (entry.id !== this.getCurrentDisplayEntries()[this.getCurrentDisplayEntries().length - 1]?.id) {
+                      Divider()
+                        .strokeWidth(0.5)
+                        .color('#f0f0f0')
+                        .margin({ left: 16, right: 0 })
+                    }
+                  }
+                  .onHover((isHover: boolean) => {
+                    this.hoverEntryId = isHover ? entry.id : (this.hoverEntryId === entry.id ? null : this.hoverEntryId)
+                  })
+                }, (entry: EntryItem) => entry.id)
+              }
+              .width('100%')
+              .alignItems(HorizontalAlign.Start)
+              .justifyContent(FlexAlign.Start)
             }
             .width('100%')
             .layoutWeight(1)
             .backgroundColor('#fff')
-            .divider({ strokeWidth: 0.5, color: '#f0f0f0', startMargin: 16, endMargin: 0 })
+            .align(Alignment.TopStart)
           }
         }
         .width(this.secondColumnWidth)
@@ -1460,5 +1612,165 @@ struct MainPage {
    */
   aboutToDisappear() {
     this.clearAutoCloseTimer()
+    this.clearSearchTimer()
+  }
+
+  /**
+   * 清除搜索计时器
+   */
+  private clearSearchTimer() {
+    if (this.searchTimer !== null) {
+      clearTimeout(this.searchTimer)
+      this.searchTimer = null
+    }
+  }
+
+  /**
+   * 防抖搜索
+   */
+  private debounceSearch(query: string) {
+    // 清除之前的计时器
+    this.clearSearchTimer()
+    
+    // 设置新的计时器
+    this.searchTimer = setTimeout(() => {
+      this.performSearch(query)
+    }, this.SEARCH_DEBOUNCE_DELAY)
+  }
+
+  /**
+   * 执行搜索
+   */
+  private async performSearch(query: string) {
+    if (!this.kdbxQuery) {
+      return
+    }
+
+    try {
+      if (!query.trim()) {
+        // 空搜索，显示当前选中侧边栏的所有条目
+        this.isSearching = false
+        this.filteredEntryItems = []
+        return
+      }
+
+      this.isSearching = true
+
+      // 构建搜索条件
+      const searchCriteria: SearchCriteria = {
+        query: query.trim(),
+        searchInTitles: true,
+        searchInUsernames: true,
+        searchInUrls: true,
+        searchInNotes: true,
+        caseSensitive: false,
+        useRegex: false
+      }
+
+      // 执行搜索
+      const searchResult = this.kdbxQuery.searchEntries(searchCriteria)
+      
+      if (searchResult.success && searchResult.data) {
+        // 将搜索结果转换为 EntryItem 格式
+        const searchedItems: EntryItem[] = []
+        
+        for (const result of searchResult.data) {
+          const entryItem = this.convertKdbxEntryToEntryItem(result.entry, result.group)
+          if (entryItem) {
+            searchedItems.push(entryItem)
+          }
+        }
+
+        this.filteredEntryItems = searchedItems
+      } else {
+        this.filteredEntryItems = []
+      }
+
+    } catch (error) {
+      console.error('MainPage', '搜索失败:', error)
+      this.filteredEntryItems = []
+    }
+  }
+
+  /**
+   * 将 KdbxEntry 转换为 EntryItem
+   */
+  private convertKdbxEntryToEntryItem(entry: ESObject, group?: ESObject): EntryItem | null {
+    try {
+      const entryFields = entry.fields as Map<string, Object>;
+      
+      // 提取所有字段
+      const fields = new Map<string, string>();
+      entryFields.forEach((value, key) => {
+        const fieldValue = this.getFieldValue(entryFields, key);
+        if (fieldValue && fieldValue.trim().length > 0) {
+          fields.set(key, fieldValue);
+        }
+      });
+      
+      // 添加时间信息
+      const lastModTime = ((entry.times as ESObject).lastModTime as Date) || new Date();
+      fields.set('修改时间', this.formatDate(lastModTime));
+      
+      const creationTime = ((entry.times as ESObject).creationTime as Date);
+      if (creationTime) {
+        fields.set('创建时间', this.formatDate(creationTime));
+      }
+      
+      // 检查是否已加星
+      const isStarred = this.kdbxEntryManager ? this.kdbxEntryManager.isEntryStarred(entry as ESObject) : false;
+      fields.set('Starred', isStarred ? 'true' : 'false');
+      
+      // 提取tags信息
+      const tags = (entry.tags as string[]) || [];
+      if (tags.length > 0) {
+        fields.set('Tags', tags.join(','));
+      }
+      
+      return ({
+        id: (entry.uuid as ESObject).id as string,
+        title: this.getFieldValue(entryFields, 'Title') || '无标题',
+        username: this.getFieldValue(entryFields, 'UserName') || '',
+        notes: this.getFieldValue(entryFields, 'Notes') || '',
+        url: this.getFieldValue(entryFields, 'URL') || '',
+        icon: $r('app.media.startIcon'),
+        lastModified: this.formatDate(lastModTime),
+        groupId: group ? ((group as ESObject).uuid as ESObject).id as string : (entry.parentGroup ? ((entry.parentGroup as ESObject).uuid as ESObject).id as string : ''),
+        groupName: group ? ((group as ESObject).name as string) : (entry.parentGroup ? ((entry.parentGroup as ESObject).name as string) : ''),
+        fields: fields
+      }) as EntryItem;
+    } catch (error) {
+      console.error('MainPage', '转换条目失败:', error)
+      return null
+    }
+  }
+
+  /**
+   * 获取当前显示的条目列表（搜索时显示搜索结果，否则显示侧边栏选中的条目）
+   */
+  private getCurrentDisplayEntries(): EntryItem[] {
+    if (this.isSearching) {
+      return this.filteredEntryItems
+    }
+    return this.entryItems
+  }
+
+  /**
+   * 清空搜索
+   */
+  private clearSearch() {
+    this.searchQuery = ''
+    this.isSearching = false
+    this.filteredEntryItems = []
+  }
+
+  /**
+   * 检查文本是否包含搜索关键词（用于高亮显示）
+   */
+  private containsSearchKeyword(text: string): boolean {
+    if (!this.isSearching || !this.searchQuery.trim()) {
+      return false
+    }
+    return text.toLowerCase().includes(this.searchQuery.toLowerCase())
   }
 } 
