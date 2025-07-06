@@ -691,6 +691,190 @@ export class KdbxEntryManager {
     }
     return false;
   }
+
+  /**
+   * 检查条目是否已加星
+   */
+  isEntryStarred(entry: KdbxEntry): boolean {
+    try {
+      // 检查标签
+      if (entry.tags && entry.tags.length > 0) {
+        const hasStarTag = entry.tags.some(tag => 
+          tag.toLowerCase().includes('star') || 
+          tag.toLowerCase().includes('favorite')
+        );
+        if (hasStarTag) {
+          return true;
+        }
+      }
+      
+      // 检查自定义字段
+      const customFields = entry.fields;
+      for (const fieldEntry of customFields.entries()) {
+        const key = fieldEntry[0];
+        const value = fieldEntry[1];
+        if (key.toLowerCase().includes('star') || key.toLowerCase().includes('favorite')) {
+          const fieldValue = (value && typeof value === 'object' && (value as ESObject).getText) ? 
+            (value as ESObject).getText() as string : value;
+          if (fieldValue && fieldValue.toString().toLowerCase() === 'true') {
+            return true;
+          }
+        }
+      }
+      
+      return false;
+    } catch (error) {
+      logError('isEntryStarred', error as Error);
+      return false;
+    }
+  }
+
+  /**
+   * 添加条目星标
+   */
+  addStarToEntry(entry: KdbxEntry): OperationResult<KdbxEntry> {
+    try {
+      if (!this.database) {
+        return {
+          success: false,
+          error: '数据库未设置',
+          errorCode: 'DATABASE_NOT_SET'
+        };
+      }
+
+      // 检查是否已经加星
+      if (this.isEntryStarred(entry)) {
+        return {
+          success: true,
+          data: entry
+        };
+      }
+
+      // 添加星标标签
+      const starTag = 'star';
+      if (!entry.tags.includes(starTag)) {
+        entry.tags.push(starTag);
+      }
+
+      // 更新时间戳
+      if (entry.times) {
+        entry.times.lastModTime = new Date();
+      }
+
+      // 标记数据库已修改
+      this.markModified();
+
+      hilog.info(0, TAG, '条目添加星标成功: %{public}s', entry.uuid.id);
+
+      // 触发事件
+      if (this.onEvent) {
+        const eventData: EventData = {
+          entryId: entry.uuid.id,
+          action: 'starred'
+        };
+        this.onEvent(DatabaseEventType.ENTRY_UPDATED, eventData);
+      }
+
+      return {
+        success: true,
+        data: entry
+      };
+
+    } catch (error) {
+      logError('addStarToEntry', error as Error);
+      return {
+        success: false,
+        error: (error as Error).message,
+        errorCode: 'ADD_STAR_ERROR'
+      };
+    }
+  }
+
+  /**
+   * 移除条目星标
+   */
+  removeStarFromEntry(entry: KdbxEntry): OperationResult<KdbxEntry> {
+    try {
+      if (!this.database) {
+        return {
+          success: false,
+          error: '数据库未设置',
+          errorCode: 'DATABASE_NOT_SET'
+        };
+      }
+
+      // 移除星标标签
+      entry.tags = entry.tags.filter(tag => 
+        !tag.toLowerCase().includes('star') && 
+        !tag.toLowerCase().includes('favorite')
+      );
+
+      // 移除星标相关的自定义字段
+      const fieldsToRemove: string[] = [];
+      for (const fieldEntry of entry.fields.entries()) {
+        const key = fieldEntry[0];
+        if (key.toLowerCase().includes('star') || key.toLowerCase().includes('favorite')) {
+          fieldsToRemove.push(key);
+        }
+      }
+      
+      for (const key of fieldsToRemove) {
+        entry.fields.delete(key);
+      }
+
+      // 更新时间戳
+      if (entry.times) {
+        entry.times.lastModTime = new Date();
+      }
+
+      // 标记数据库已修改
+      this.markModified();
+
+      hilog.info(0, TAG, '条目移除星标成功: %{public}s', entry.uuid.id);
+
+      // 触发事件
+      if (this.onEvent) {
+        const eventData: EventData = {
+          entryId: entry.uuid.id,
+          action: 'unstarred'
+        };
+        this.onEvent(DatabaseEventType.ENTRY_UPDATED, eventData);
+      }
+
+      return {
+        success: true,
+        data: entry
+      };
+
+    } catch (error) {
+      logError('removeStarFromEntry', error as Error);
+      return {
+        success: false,
+        error: (error as Error).message,
+        errorCode: 'REMOVE_STAR_ERROR'
+      };
+    }
+  }
+
+  /**
+   * 切换条目星标状态
+   */
+  toggleEntryStarred(entry: KdbxEntry): OperationResult<KdbxEntry> {
+    try {
+      if (this.isEntryStarred(entry)) {
+        return this.removeStarFromEntry(entry);
+      } else {
+        return this.addStarToEntry(entry);
+      }
+    } catch (error) {
+      logError('toggleEntryStarred', error as Error);
+      return {
+        success: false,
+        error: (error as Error).message,
+        errorCode: 'TOGGLE_STAR_ERROR'
+      };
+    }
+  }
 }
 
 export default KdbxEntryManager; 

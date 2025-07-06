@@ -325,9 +325,13 @@ struct Index {
         .borderRadius(8)
         .padding({ left: 16, right: 16 })
         .fontSize(16)
+        .defaultFocus(true)
         .onChange((value: string) => {
           this.password = value;
           this.clearError();
+        })
+        .onSubmit(() => {
+          this.openDefaultDatabase();
         })
         .margin({ bottom: 30 })
       
@@ -406,6 +410,9 @@ struct Index {
         .onChange((value: string) => {
           this.confirmPassword = value;
           this.clearError();
+        })
+        .onSubmit(() => {
+          this.createDefaultDatabase();
         })
         .margin({ bottom: 30 })
       

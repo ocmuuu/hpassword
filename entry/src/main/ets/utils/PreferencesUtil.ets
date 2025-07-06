@@ -1,22 +1,37 @@
+import { preferences } from '@kit.ArkData';
+import { BusinessError } from '@kit.BasicServicesKit';
+
 export default class PreferencesUtil {
   private static initialized: boolean = false;
-  private static store: Map<string, Object | boolean | number | string> = new Map();
+  private static dataPreferences: preferences.Preferences | null = null;
 
   /**
    * 同步初始化，真实场景可替换为PreferenceManager等持久化实现。
    */
-  static initSync(_context: Object): boolean {
-    // 这里仅作占位实现，标记已初始化
-    PreferencesUtil.initialized = true;
-    return PreferencesUtil.initialized;
+  static initSync(context: Object): boolean {
+    try {
+      // 同步初始化preferences
+      PreferencesUtil.dataPreferences = preferences.getPreferencesSync(context as Context, { name: 'hPassword_settings.db' });
+      PreferencesUtil.initialized = true;
+      return true;
+    } catch (err) {
+      console.error('PreferencesUtil', 'Failed to get preferences sync', err);
+      return false;
+    }
   }
 
   /**
    * 异步初始化（兼容原异步调用）。
    */
-  static async init(_context: Object): Promise<boolean> {
-    PreferencesUtil.initialized = true;
-    return PreferencesUtil.initialized;
+  static async init(context: Object): Promise<boolean> {
+    try {
+      PreferencesUtil.dataPreferences = await preferences.getPreferences(context as Context, 'hPassword_settings.db');
+      PreferencesUtil.initialized = true;
+      return true;
+    } catch (err) {
+      console.error('PreferencesUtil', 'Failed to get preferences', err);
+      return false;
+    }
   }
 
   static isInitialized(): boolean {
@@ -25,33 +40,45 @@ export default class PreferencesUtil {
 
   // region Getter
   static getKdbxFirstColumnCollapseStateSync(): boolean {
-    return (PreferencesUtil.store.get('kdbx_first_column_collapsed') as boolean) ?? false;
+    return PreferencesUtil.dataPreferences?.getSync('kdbx_first_column_collapsed', false) as boolean ?? false;
   }
 
   static getKdbxFirstColumnWidthSync(): number {
-    return (PreferencesUtil.store.get('kdbx_first_column_width') as number) ?? 250;
+    return PreferencesUtil.dataPreferences?.getSync('kdbx_first_column_width', 250) as number ?? 250;
   }
 
   static getKdbxSecondColumnWidthSync(): number {
-    return (PreferencesUtil.store.get('kdbx_second_column_width') as number) ?? 350;
+    return PreferencesUtil.dataPreferences?.getSync('kdbx_second_column_width', 350) as number ?? 350;
   }
   // endregion
 
   // region Setter
   static saveSelectedKdbxSidebarIdSync(id: string): void {
-    PreferencesUtil.store.set('kdbx_selected_sidebar_id', id);
+    if (PreferencesUtil.dataPreferences) {
+      PreferencesUtil.dataPreferences.putSync('kdbx_selected_sidebar_id', id);
+      PreferencesUtil.dataPreferences.flush();
+    }
   }
 
   static saveKdbxFirstColumnCollapseStateSync(state: boolean): void {
-    PreferencesUtil.store.set('kdbx_first_column_collapsed', state);
+    if (PreferencesUtil.dataPreferences) {
+      PreferencesUtil.dataPreferences.putSync('kdbx_first_column_collapsed', state);
+      PreferencesUtil.dataPreferences.flush();
+    }
   }
 
   static saveKdbxFirstColumnWidthSync(width: number): void {
-    PreferencesUtil.store.set('kdbx_first_column_width', width);
+    if (PreferencesUtil.dataPreferences) {
+      PreferencesUtil.dataPreferences.putSync('kdbx_first_column_width', width);
+      PreferencesUtil.dataPreferences.flush();
+    }
   }
 
   static saveKdbxSecondColumnWidthSync(width: number): void {
-    PreferencesUtil.store.set('kdbx_second_column_width', width);
+    if (PreferencesUtil.dataPreferences) {
+      PreferencesUtil.dataPreferences.putSync('kdbx_second_column_width', width);
+      PreferencesUtil.dataPreferences.flush();
+    }
   }
   // endregion
 } 

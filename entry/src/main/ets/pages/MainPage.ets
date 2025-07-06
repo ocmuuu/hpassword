@@ -3,6 +3,8 @@ import { KdbxCore, KdbxCoreManager } from '../utils/KdbxCore'
 import { KdbxQuery } from '../utils/KdbxQuery'
 import { KdbxEntryManager } from '../utils/KdbxEntryManager'
 import { KdbxGroupManager } from '../utils/KdbxGroupManager'
+import { DatabaseFileManager } from '../utils/DatabaseFileManager'
+import { OperationResult } from '../utils/KdbxTypes'
 // 移除对 kdbxweb 的依赖，使用内置类型兼容
 import PreferencesUtil from '../utils/PreferencesUtil'
 import { 
@@ -60,6 +62,7 @@ struct MainPage {
   @State private kdbxQuery: KdbxQuery | null = null
   @State private kdbxEntryManager: KdbxEntryManager | null = null
   @State private kdbxGroupManager: KdbxGroupManager | null = null
+  @State private databaseFileManager: DatabaseFileManager | null = null
   
   // 数据状态
   @State private sidebarItems: SidebarItem[] = []
@@ -109,6 +112,10 @@ struct MainPage {
           this.kdbxQuery = new KdbxQuery(db)
           this.kdbxEntryManager = new KdbxEntryManager(db)
           this.kdbxGroupManager = new KdbxGroupManager(db)
+          
+          // 初始化文件管理器
+          const context = getContext(this) as Context
+          this.databaseFileManager = new DatabaseFileManager(context)
         }
         
         // 初始化数据
@@ -242,7 +249,7 @@ struct MainPage {
         return
       }
       
-      let entries: Object[] = []
+      let entries: ESObject[] = []
       
       // 检查是否是回收站
       const selectedItem = this.sidebarItems.find(item => item.id === sidebarId)
@@ -264,7 +271,7 @@ struct MainPage {
       }
       
              // 转换为UI显示格式
-       const mappedItems: EntryItem[] = entries.map(entryRaw => {
+       const mappedItems: EntryItem[] = entries.map((entryRaw: ESObject) => {
          const entry: ESObject = entryRaw as ESObject;
          const entryFields = entry.fields as Map<string, Object>;
          
@@ -284,6 +291,16 @@ struct MainPage {
          const creationTime = ((entry.times as ESObject).creationTime as Date);
          if (creationTime) {
            fields.set('创建时间', this.formatDate(creationTime));
+         }
+         
+         // 检查是否已加星
+         const isStarred = this.kdbxEntryManager ? this.kdbxEntryManager.isEntryStarred(entry as ESObject) : false;
+         fields.set('Starred', isStarred ? 'true' : 'false');
+         
+         // 提取tags信息
+         const tags = (entry.tags as string[]) || [];
+         if (tags.length > 0) {
+           fields.set('Tags', tags.join(','));
          }
          
          return ({
@@ -573,7 +590,7 @@ struct MainPage {
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
 
-        if (item.count !== undefined && item.count > 0) {
+        if (item.type === 'special' && item.count !== undefined && item.count > 0) {
           Text(item.count.toString())
             .fontSize(12)
             .fontColor('#fff')
@@ -664,15 +681,55 @@ struct MainPage {
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
 
-          Button('编辑')
-            .fontSize(14)
-            .backgroundColor('#007AFF')
-            .onClick(() => {
-              // TODO: 实现编辑功能
-            })
+          // 加星/取消加星按钮
+          Button() {
+            Image(this.isEntryStarred(this.selectedEntry) ? $r('app.media.star') : $r('app.media.unstar'))
+              .width(20)
+              .height(20)
+              .fillColor(this.isEntryStarred(this.selectedEntry) ? '#FFD700' : '#666')
+          }
+          .backgroundColor('transparent')
+          .padding(8)
+          .margin({ right: 8 })
+          .stateEffect(false)
+          .onClick(async () => {
+            if (this.selectedEntry && this.kdbxEntryManager) {
+              const kdbxEntry: ESObject | null = await this.getKdbxEntryById(this.selectedEntry.id);
+              if (kdbxEntry) {
+                const result = this.kdbxEntryManager.toggleEntryStarred(kdbxEntry);
+                if (result.success) {
+                  // 保存数据库到文件
+                  await this.saveDatabaseToFile();
+                  
+                  // 更新侧边栏的加星数量
+                  await this.updateSidebarStarredCount();
+                  
+                  // 刷新列表
+                  await this.loadEntriesForSidebar(this.selectedSidebarId || 'all_entries');
+                  // 更新选中项
+                  this.selectedEntry = this.entryItems.find(item => item.id === this.selectedEntry?.id) || null;
+                }
+              }
+            }
+          })
+
+          // 编辑按钮
+          Button() {
+            Image($r('app.media.edit'))
+              .width(20)
+              .height(20)
+              .fillColor('#007AFF')
+          }
+          .backgroundColor('transparent')
+          .padding(8)
+          .stateEffect(false)
+          .onClick(() => {
+            // TODO: 实现编辑功能
+          })
         }
         .width('100%')
-        .padding({ left: 20, right: 20, top: 16, bottom: 16 })
+        .height(50)
+        .padding({ left: 16, right: 16 })
         .backgroundColor('#f8f9fa')
         .border({ width: { bottom: 1 }, color: '#e0e0e0' })
 
@@ -890,6 +947,111 @@ struct MainPage {
 
   // 已移除 FieldItemView，所有逻辑在 processSortedFields 中完成，UI 只做渲染
 
+  /**
+   * 判断条目是否已加星
+   */
+  private isEntryStarred(entry: EntryItem | null): boolean {
+    if (!entry) return false;
+    
+    // 从fields中查找star相关标记
+    const fields = entry.fields;
+    if (!fields) return false;
+    
+    // 检查是否有star字段
+    if (fields.get('Starred') === 'true') {
+      return true;
+    }
+    
+    // 检查标签（如果有的话）
+    const tags = fields.get('Tags') || '';
+    if (tags.toLowerCase().includes('star') || tags.toLowerCase().includes('favorite')) {
+      return true;
+    }
+    
+    return false;
+  }
+
+  /**
+   * 通过ID获取KdbxEntry对象
+   */
+  private async getKdbxEntryById(entryId: string): Promise<ESObject | null> {
+    if (!this.kdbxQuery) {
+      return null;
+    }
+
+    try {
+      const result: OperationResult<ESObject> = this.kdbxQuery.findEntryById(entryId);
+      if (result.success && result.data) {
+        return result.data as ESObject;
+      }
+    } catch (error) {
+      console.error('MainPage', '获取条目失败:', error);
+    }
+    
+    return null;
+  }
+
+  /**
+   * 保存数据库到文件
+   */
+  private async saveDatabaseToFile(): Promise<void> {
+    try {
+      if (!this.kdbxCore || !this.databaseFileManager) {
+        console.error('MainPage', '数据库核心或文件管理器未初始化');
+        return;
+      }
+
+      const database = this.kdbxCore.getDatabase();
+      if (!database) {
+        console.error('MainPage', '数据库实例不存在');
+        return;
+      }
+
+      const saveResult = await this.databaseFileManager.saveDatabaseToFile(database, 'default.kdbx');
+      if (saveResult.success) {
+        console.log('MainPage', '数据库保存成功');
+      } else {
+        console.error('MainPage', '数据库保存失败:', saveResult.error);
+      }
+    } catch (error) {
+      console.error('MainPage', '保存数据库时发生错误:', error);
+    }
+  }
+
+  /**
+   * 更新侧边栏加星条目的数量
+   */
+  private async updateSidebarStarredCount(): Promise<void> {
+    try {
+      const newStarredCount = await this.getStarredEntryCount();
+      
+      // 更新fixedSidebarItems中的加星条目数量
+      const starredItemIndex = this.fixedSidebarItems.findIndex(item => item.id === 'starred');
+      if (starredItemIndex !== -1) {
+        const updatedItem = { ...this.fixedSidebarItems[starredItemIndex] };
+        updatedItem.count = newStarredCount;
+        this.fixedSidebarItems[starredItemIndex] = updatedItem;
+        
+        // 触发状态更新
+        this.fixedSidebarItems = [...this.fixedSidebarItems];
+      }
+      
+      // 也更新sidebarItems中的数量（保持一致性）
+      const allStarredItemIndex = this.sidebarItems.findIndex(item => item.id === 'starred');
+      if (allStarredItemIndex !== -1) {
+        const updatedAllItem = { ...this.sidebarItems[allStarredItemIndex] };
+        updatedAllItem.count = newStarredCount;
+        this.sidebarItems[allStarredItemIndex] = updatedAllItem;
+        
+        // 触发状态更新
+        this.sidebarItems = [...this.sidebarItems];
+      }
+      
+    } catch (error) {
+      console.error('MainPage', '更新加星数量失败:', error);
+    }
+  }
+
   build() {
     if (!this.isInitialized) {
       // 加载状态
@@ -934,10 +1096,10 @@ struct MainPage {
                 .fontColor('#000')
                 .layoutWeight(1)
 
-              Button('返回')
-                .fontSize(14)
-                .backgroundColor('#f0f0f0')
-                .fontColor('#666')
+              Image($r('app.media.lock'))
+                .width(20)
+                .height(20)
+                .fillColor('#666')
                 .onClick(() => {
                   this.onBackToHome()
                 })
