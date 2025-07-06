@@ -11,7 +11,7 @@ interface SidebarItem {
   id: string
   title: string
   icon: Resource
-  type: 'special' | 'group' | 'recycle'
+  type: 'special' | 'group' | 'recycle' | 'divider'
   count?: number
   parentId?: string
 }
@@ -38,6 +38,8 @@ struct MainPage {
   
   // 数据状态
   @State private sidebarItems: SidebarItem[] = []
+  @State private fixedSidebarItems: SidebarItem[] = []  // 固定在上方的项目
+  @State private scrollableSidebarItems: SidebarItem[] = []  // 可滚动的项目
   @State private entryItems: EntryItem[] = []
   @State private selectedSidebarId: string | null = null
   @State private selectedEntryId: string | null = null
@@ -147,10 +149,12 @@ struct MainPage {
    * 初始化侧边栏项目
    */
   private async initializeSidebarItems() {
-    const items: SidebarItem[] = []
+    const allItems: SidebarItem[] = []
+    const fixedItems: SidebarItem[] = []
+    const scrollableItems: SidebarItem[] = []
     
-    // 特殊项目
-    items.push({
+    // 固定的特殊项目
+    fixedItems.push({
       id: 'all_entries',
       title: '所有条目',
       icon: $r('app.media.startIcon'),
@@ -158,7 +162,7 @@ struct MainPage {
       count: await this.getTotalEntryCount()
     })
     
-    items.push({
+    fixedItems.push({
       id: 'starred',
       title: '加星条目',
       icon: $r('app.media.startIcon'),
@@ -166,40 +170,39 @@ struct MainPage {
       count: await this.getStarredEntryCount()
     })
     
-    items.push({
-      id: 'recently_modified',
-      title: '最近修改',
+    // 添加分割线到固定区域
+    fixedItems.push({
+      id: 'divider_fixed',
+      title: '',
       icon: $r('app.media.startIcon'),
-      type: 'special',
-      count: await this.getRecentlyModifiedCount()
+      type: 'divider'
     })
     
-         // 组项目
-     if (this.kdbxQuery) {
-       const groupsResult = await this.kdbxQuery.getAllGroups()
-       if (groupsResult.success && groupsResult.data) {
-         for (const group of groupsResult.data) {
-           items.push({
-             id: group.uuid.id,
-             title: (group.name || '未命名'),
-             icon: $r('app.media.startIcon'),
-             type: 'group',
-             count: await this.getGroupEntryCount(group.uuid.id)
-           })
-         }
-       }
-     }
+    // 组项目（可滚动）
+    if (this.kdbxQuery) {
+      const groupsResult = await this.kdbxQuery.getAllGroups()
+      if (groupsResult.success && groupsResult.data) {
+        for (const group of groupsResult.data) {
+          const isRecycleBin = group.name === 'Recycle Bin'
+          scrollableItems.push({
+            id: group.uuid.id,
+            title: isRecycleBin ? '回收站' : (group.name || '未命名'),
+            icon: $r('app.media.startIcon'),
+            type: isRecycleBin ? 'recycle' : 'group',
+            count: await this.getGroupEntryCount(group.uuid.id)
+          })
+        }
+      }
+    }
     
-    // 回收站
-    items.push({
-      id: 'recycle_bin',
-      title: '回收站',
-      icon: $r('app.media.startIcon'),
-      type: 'recycle',
-      count: await this.getRecycleBinCount()
-    })
+    // 注意：回收站会作为普通组由 getAllGroups() 返回，不需要手动添加
     
-    this.sidebarItems = items
+    // 合并所有项目（保持向后兼容）
+    allItems.push(...fixedItems, ...scrollableItems)
+    
+    this.sidebarItems = allItems
+    this.fixedSidebarItems = fixedItems
+    this.scrollableSidebarItems = scrollableItems
   }
 
   /**
@@ -211,31 +214,26 @@ struct MainPage {
         return
       }
       
-             let entries: Object[] = []
-       
-       switch (sidebarId) {
-         case 'all_entries':
-           const allResult = await this.kdbxQuery.getAllEntries()
-           entries = allResult.success && allResult.data ? allResult.data : []
-           break
-         case 'starred':
-           const starredResult = await this.kdbxQuery.getStarredEntries()
-           entries = starredResult.success && starredResult.data ? starredResult.data : []
-           break
-         case 'recently_modified':
-           const recentResult = await this.kdbxQuery.getRecentlyModifiedEntries()
-           entries = recentResult.success && recentResult.data ? recentResult.data : []
-           break
-         case 'recycle_bin':
-           const recycleResult = await this.kdbxQuery.getRecycleBinEntries()
-           entries = recycleResult.success && recycleResult.data ? recycleResult.data : []
-           break
-         default:
-           // 组条目
-           const groupResult = await this.kdbxQuery.getEntriesByGroup(sidebarId)
-           entries = groupResult.success && groupResult.data ? groupResult.data : []
-           break
-       }
+      let entries: Object[] = []
+      
+      // 检查是否是回收站
+      const selectedItem = this.sidebarItems.find(item => item.id === sidebarId)
+      const isRecycleBin = selectedItem?.type === 'recycle'
+      
+      if (sidebarId === 'all_entries') {
+        const allResult = await this.kdbxQuery.getAllEntries()
+        entries = allResult.success && allResult.data ? allResult.data : []
+      } else if (sidebarId === 'starred') {
+        const starredResult = await this.kdbxQuery.getStarredEntries()
+        entries = starredResult.success && starredResult.data ? starredResult.data : []
+      } else if (isRecycleBin) {
+        const recycleResult = await this.kdbxQuery.getRecycleBinEntries()
+        entries = recycleResult.success && recycleResult.data ? recycleResult.data : []
+      } else {
+        // 普通组条目
+        const groupResult = await this.kdbxQuery.getEntriesByGroup(sidebarId)
+        entries = groupResult.success && groupResult.data ? groupResult.data : []
+      }
       
              // 转换为UI显示格式
        const mappedItems: EntryItem[] = entries.map(entryRaw => {
@@ -319,6 +317,11 @@ struct MainPage {
    * 侧边栏项目点击处理
    */
   private async onSidebarItemClick(item: SidebarItem) {
+    // 分割线不可点击
+    if (item.type === 'divider') {
+      return
+    }
+    
     this.selectedSidebarId = item.id
     this.selectedEntryId = null
     this.selectedEntry = null
@@ -362,37 +365,45 @@ struct MainPage {
   /**
    * 创建侧边栏项目视图
    */
-  @Builder
+    @Builder
   private SidebarItemView(item: SidebarItem) {
-    Row() {
-      Image(item.icon)
-        .width(20)
-        .height(20)
-        .margin({ right: 12 })
-        .fillColor(item.type === 'special' ? '#007AFF' : '#666666')
+    if (item.type === 'divider') {
+      // 分割线
+      Divider()
+        .strokeWidth(1)
+        .color('#e0e0e0')
+        .margin({ left: 16, right: 16, top: 8, bottom: 8 })
+    } else {
+      Row() {
+        Image(item.icon)
+          .width(20)
+          .height(20)
+          .margin({ right: 12 })
+          .fillColor(item.type === 'special' ? '#007AFF' : '#666666')
 
-      Text(item.title)
-        .fontSize(16)
-        .fontWeight(item.type === 'special' ? FontWeight.Medium : FontWeight.Normal)
-        .fontColor('#000')
-        .layoutWeight(1)
-        .maxLines(1)
-        .textOverflow({ overflow: TextOverflow.Ellipsis })
+        Text(item.title)
+          .fontSize(16)
+          .fontWeight(item.type === 'special' ? FontWeight.Medium : FontWeight.Normal)
+          .fontColor('#000')
+          .layoutWeight(1)
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
 
-      if (item.count !== undefined && item.count > 0) {
-        Text(item.count.toString())
-          .fontSize(12)
-          .fontColor('#fff')
-          .backgroundColor('#007AFF')
-          .borderRadius(10)
-          .padding({ left: 6, right: 6, top: 2, bottom: 2 })
+        if (item.count !== undefined && item.count > 0) {
+          Text(item.count.toString())
+            .fontSize(12)
+            .fontColor('#fff')
+            .backgroundColor('#007AFF')
+            .borderRadius(10)
+            .padding({ left: 6, right: 6, top: 2, bottom: 2 })
+        }
       }
+      .width('100%')
+      .height(40)
+      .padding({ left: 16, right: 16 })
+      .backgroundColor(this.selectedSidebarId === item.id ? '#f0f7ff' : '#fff')
+      .alignItems(VerticalAlign.Center)
     }
-    .width('100%')
-    .height(40)
-    .padding({ left: 16, right: 16 })
-    .backgroundColor(this.selectedSidebarId === item.id ? '#f0f7ff' : '#fff')
-    .alignItems(VerticalAlign.Center)
   }
 
   /**
@@ -625,20 +636,44 @@ struct MainPage {
             .backgroundColor('#f8f9fa')
             .border({ width: { bottom: 1 }, color: '#e0e0e0' })
 
-            // 侧边栏列表
-            List() {
-              ForEach(this.sidebarItems, (item: SidebarItem) => {
-                ListItem() {
-                  this.SidebarItemView(item)
-                }
-                .onClick(() => {
-                  this.onSidebarItemClick(item)
-                })
-              }, (item: SidebarItem) => item.id)
+            // 侧边栏内容
+            Column() {
+              // 固定区域：所有条目、加星条目、分割线
+              Column() {
+                ForEach(this.fixedSidebarItems, (item: SidebarItem) => {
+                  Column() {
+                    this.SidebarItemView(item)
+                  }
+                  .width('100%')
+                  .onClick(() => {
+                    if (item.type !== 'divider') {
+                      this.onSidebarItemClick(item)
+                    }
+                  })
+                }, (item: SidebarItem) => item.id)
+              }
+              .width('100%')
+              .backgroundColor('#fff')
+              
+              // 可滚动区域：分类组和回收站
+              List() {
+                ForEach(this.scrollableSidebarItems, (item: SidebarItem) => {
+                  ListItem() {
+                    this.SidebarItemView(item)
+                  }
+                  .onClick(() => {
+                    if (item.type !== 'divider') {
+                      this.onSidebarItemClick(item)
+                    }
+                  })
+                }, (item: SidebarItem) => item.id)
+              }
+              .width('100%')
+              .layoutWeight(1)
+              .backgroundColor('#fff')
             }
             .width('100%')
             .layoutWeight(1)
-            .backgroundColor('#fff')
           }
           .width(this.firstColumnWidth)
           .height('100%')

@@ -5,7 +5,8 @@ import { KdbxGroupManager } from '../utils/KdbxGroupManager';
 import { KdbxEntryManager } from '../utils/KdbxEntryManager';
 import { KdbxQuery } from '../utils/KdbxQuery';
 import { DefaultDatabase } from '../utils/DefaultDatabase';
-import { KdbxGroup, KdbxEntry } from '../lib';
+import { KdbxGroup, KdbxEntry, ProtectedValue } from '../lib';
+import { ALL_TEMPLATES, CategoryTemplate, FieldSpec } from '../templates';
 import { 
   GroupCreateParams, 
   EntryCreateParams, 
@@ -114,6 +115,164 @@ export class DatabaseCRUDTest {
   }
 
   /**
+   * 根据 templates 初始化分类分组及示例条目
+   */
+  private initializeTemplatesData(): void {
+    if (!this.groupManager || !this.entryManager || !this.kdbxCore) {
+      throw new Error('管理器未初始化');
+    }
+
+    const database = this.kdbxCore.getDatabase();
+    if (!database) {
+      throw new Error('数据库未加载');
+    }
+
+    const rootGroup = database.getDefaultGroup();
+    if (!rootGroup) {
+      throw new Error('根组不存在');
+    }
+
+    // 遍历所有模板
+    for (let i = 0; i < ALL_TEMPLATES.length; i++) {
+      const tpl: CategoryTemplate = ALL_TEMPLATES[i];
+
+      // 创建或获取分组
+      const groupResult = this.groupManager.createGroup({
+        name: tpl.name,
+        notes: tpl.desc,
+        parentGroup: rootGroup
+      });
+
+      const targetGroup = groupResult.success && groupResult.data ? groupResult.data : null;
+      if (!targetGroup) {
+        hilog.warn(0, TAG, '创建分组失败或已存在: %{public}s', tpl.name);
+        continue;
+      }
+
+      // 遍历示例条目（最多2条）
+      const samples = tpl.samples.slice(0, 2);
+      for (let j = 0; j < samples.length; j++) {
+        const sample = samples[j];
+
+        // 构造条目参数
+        const createParams: EntryCreateParams = {
+          title: sample['Title'] || `${tpl.name} 示例 ${j + 1}`,
+          parentGroup: targetGroup,
+          customFields: new Map()
+        } as EntryCreateParams;
+
+        // 根据模板字段映射到 EntryCreateParams
+        for (let k = 0; k < tpl.fields.length; k++) {
+          const field: FieldSpec = tpl.fields[k];
+          const key = field.key;
+          const maybeVal = (sample as Record<string, string>)[key];
+          if (maybeVal === undefined) {
+            continue;
+          }
+          const value = maybeVal;
+
+          switch (key) {
+            case 'UserName':
+              createParams.username = value as string;
+              break;
+            case 'Password':
+              createParams.password = value as string;
+              break;
+            case 'URL':
+              createParams.url = value as string;
+              break;
+            case 'Notes':
+              createParams.notes = value as string;
+              break;
+            case 'Title':
+              // 已处理
+              break;
+            default:
+              // 其他字段放入 customFields，并考虑受保护标记
+              if (field.protected) {
+                createParams.customFields?.set(key, ProtectedValue.fromString(value as string));
+              } else {
+                createParams.customFields?.set(key, value as string);
+              }
+              break;
+          }
+        }
+
+        const entryResult = this.entryManager.createEntry(createParams);
+        if (entryResult.success) {
+          this.testResults.push(`✓ 初始化条目: ${tpl.name} - ${createParams.title}`);
+        } else {
+          hilog.warn(0, TAG, '创建示例条目失败: %{public}s - %{public}s', tpl.name, entryResult.error || 'unknown');
+        }
+      }
+    }
+
+    // 初始化后立即标记保存
+    hilog.info(0, TAG, '已根据模板初始化分类与示例条目');
+  }
+
+  /**
+   * 清理非模板分组及条目（移动至回收站或直接删除）
+   */
+  private cleanupNonTemplateData(): void {
+    if (!this.groupManager || !this.entryManager || !this.kdbxCore || !this.kdbxQuery) {
+      return;
+    }
+
+    const templateNames: string[] = ALL_TEMPLATES.map(t => t.name);
+
+    // 建立模板 -> 允许条目标题集合
+    const templateTitleMap = new Map<string, Set<string>>();
+    for (let i = 0; i < ALL_TEMPLATES.length; i++) {
+      const tpl = ALL_TEMPLATES[i];
+      const titles = new Set<string>();
+      for (let j = 0; j < tpl.samples.length; j++) {
+        const t = tpl.samples[j]['Title'];
+        if (typeof t === 'string') {
+          titles.add(t);
+        }
+      }
+      templateTitleMap.set(tpl.name, titles);
+    }
+
+    const groupsResult = this.kdbxQuery.getAllGroups();
+    if (!groupsResult.success || !groupsResult.data) {
+      return;
+    }
+
+    for (const group of groupsResult.data) {
+      const gName: string = group.name || '';
+
+      if (!templateNames.includes(gName)) {
+        // 非模板分组 → 递归删除（软删除）
+        this.groupManager!.deleteGroupRecursive(group);
+        continue;
+      }
+
+      // 模板分组：检查条目
+      const allowedTitles = templateTitleMap.get(gName) || new Set<string>();
+      const entriesResult = this.entryManager.getEntriesInGroup(group.uuid.id);
+      if (!entriesResult.success || !entriesResult.data) {
+        continue;
+      }
+
+      for (const info of entriesResult.data) {
+        const title = this.getEntryTitle(info);
+        if (allowedTitles.has(title)) {
+          continue;
+        }
+        // 根据ID获取真实KdbxEntry
+        const entryLookup = this.kdbxQuery.findEntryById(info.id);
+        if (entryLookup.success && entryLookup.data) {
+          this.entryManager!.deleteEntry(entryLookup.data);
+        }
+      }
+    }
+
+    this.testResults.push('✓ 非模板分组/条目清理完成');
+  }
+
+  /**
    * 运行完整的CRUD测试
    */
   async runFullCRUDTest(): Promise<boolean> {
@@ -123,7 +282,11 @@ export class DatabaseCRUDTest {
       
       // 初始状态检查 - 详细检查数据库结构
       await this.logDatabaseState('测试开始');
-      await this.logRawDatabaseStructure('测试开始');
+
+      // 0. 初始化模板分类及示例数据
+      this.initializeTemplatesData();
+      await this.logDatabaseState('模板数据初始化后');
+      await this.saveDatabase();
       
       // 1. 测试分组CRUD
       await this.testGroupCRUD();
@@ -139,6 +302,11 @@ export class DatabaseCRUDTest {
       await this.testComplexOperations();
       await this.logDatabaseState('复合操作测试后');
       await this.saveDatabase(); // 立即保存复合操作结果
+
+      // 3.5 清理非模板数据
+      this.cleanupNonTemplateData();
+      await this.logDatabaseState('清理非模板数据后');
+      await this.saveDatabase();
       
       // 4. 测试数据完整性
       await this.testDataIntegrity();
@@ -186,7 +354,7 @@ export class DatabaseCRUDTest {
     // 1. 创建分组（增）
     hilog.info(0, TAG, '测试创建分组...');
     const createParams: GroupCreateParams = {
-      name: '工作账号',
+      name: '测试分组',
       notes: '存储工作相关的账号信息',
       parentGroup: rootGroup
     };
@@ -201,7 +369,7 @@ export class DatabaseCRUDTest {
     
     // 创建子分组
     const subGroupParams: GroupCreateParams = {
-      name: '开发工具',
+      name: '子测试分组',
       notes: '开发相关的工具账号',
       parentGroup: workGroup
     };
@@ -228,8 +396,8 @@ export class DatabaseCRUDTest {
     // 3. 更新分组（改）
     hilog.info(0, TAG, '测试更新分组...');
     const updateParams: GroupUpdateParams = {
-      name: '工作账号 (已更新)',
-      notes: '更新后的工作账号描述'
+      name: '测试分组 (已更新)',
+      notes: '更新后的测试分组描述'
     };
     
     const updateResult = this.groupManager.updateGroup(workGroup, updateParams);
@@ -256,6 +424,12 @@ export class DatabaseCRUDTest {
     }
     
     this.testResults.push('✓ 删除分组成功');
+
+    // 清理：删除主测试分组，确保不留残余
+    const cleanupResult = this.groupManager!.deleteGroup(workGroup);
+    if (cleanupResult.success) {
+      this.testResults.push('✓ 清理测试分组成功');
+    }
     
     hilog.info(0, TAG, '分组CRUD操作测试完成');
   }
@@ -348,7 +522,7 @@ export class DatabaseCRUDTest {
     hilog.info(0, TAG, '测试移动条目...');
     // 首先创建一个目标分组
     const targetGroupParams: GroupCreateParams = {
-      name: '个人账号',
+      name: '临时分组',
       notes: '个人使用的账号',
       parentGroup: rootGroup
     };
@@ -375,6 +549,17 @@ export class DatabaseCRUDTest {
     }
     
     this.testResults.push('✓ 删除条目成功');
+
+    // 清理：删除最初创建的条目和临时分组
+    const deleteEntry1 = this.entryManager!.deleteEntry(testEntry);
+    if (deleteEntry1.success) {
+      this.testResults.push('✓ 清理测试条目成功');
+    }
+
+    const deleteTempGroup = this.groupManager!.deleteGroup(targetGroup);
+    if (deleteTempGroup.success) {
+      this.testResults.push('✓ 清理临时分组成功');
+    }
     
     hilog.info(0, TAG, '条目CRUD操作测试完成');
   }
@@ -402,7 +587,7 @@ export class DatabaseCRUDTest {
     // 1. 批量创建分组和条目
     hilog.info(0, TAG, '测试批量创建...');
     
-    const categories = ['社交媒体', '银行金融', '购物网站', '游戏娱乐'];
+    const categories: string[] = ['批量测试组1', '批量测试组2', '批量测试组3', '批量测试组4'];
     const createdGroups: KdbxGroup[] = [];
     
     for (const category of categories) {
@@ -442,12 +627,33 @@ export class DatabaseCRUDTest {
     // 2. 测试递归删除
     hilog.info(0, TAG, '测试递归删除...');
     const deleteTarget: KdbxGroup = createdGroups[0]; // 删除第一个分组
-    const deleteResult = this.groupManager.deleteGroupRecursive(deleteTarget);
+    const deleteResult = this.groupManager!.deleteGroupRecursive(deleteTarget);
     if (!deleteResult.success) {
       throw new Error(`递归删除失败: ${deleteResult.error}`);
     }
     
     this.testResults.push('✓ 递归删除成功');
+
+    // 工具函数：判断名称是否属于模板分类
+    const isTemplateGroup = (name: string): boolean => {
+      for (let m = 0; m < ALL_TEMPLATES.length; m++) {
+        if (ALL_TEMPLATES[m].name === name) {
+          return true;
+        }
+      }
+      return false;
+    };
+
+    // 清理：删除其余批量创建的分组
+    for (let i = 1; i < createdGroups.length; i++) {
+      const g = createdGroups[i];
+      if (isTemplateGroup(g.name || '')) {
+        // 属于模板分类则保留
+        continue;
+      }
+      this.groupManager!.deleteGroup(g);
+    }
+    this.testResults.push('✓ 清理批量创建分组成功');
     
     hilog.info(0, TAG, '复合操作测试完成');
   }
@@ -856,7 +1062,7 @@ export class DatabaseCRUDTest {
       }
       
       const groupNames = allGroups.data.map(g => g.name || '');
-      const expectedGroups = ['工作账号 (已更新)', '个人账号', '银行金融', '购物网站', '游戏娱乐'];
+      const expectedGroups: string[] = ALL_TEMPLATES.map(t => t.name);
       const missingGroups: string[] = [];
       
       for (const expectedGroup of expectedGroups) {

@@ -157,7 +157,7 @@ export class KdbxQuery {
   }
 
   /**
-   * 获取所有组
+   * 获取所有组（只返回根组的子组，不包括根组本身）
    */
   getAllGroups(): OperationResult<KdbxGroup[]> {
     try {
@@ -180,7 +180,11 @@ export class KdbxQuery {
         };
       }
 
-      this.collectGroupsFromGroup(rootGroup, groups);
+      // 只收集根组的子组，不包括根组本身
+      for (let i = 0; i < rootGroup.groups.length; i++) {
+        const childGroup = rootGroup.groups[i];
+        this.collectGroupsFromGroup(childGroup, groups);
+      }
 
       return {
         success: true,

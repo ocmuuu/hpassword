@@ -7,7 +7,7 @@ import { logOperation, logError } from './KdbxUtils';
 
 const TAG = 'DefaultDatabase';
 const DEFAULT_DATABASE_NAME = 'default.kdbx';
-const DEFAULT_DATABASE_DISPLAY_NAME = 'hPassword默认密码库';
+const DEFAULT_DATABASE_DISPLAY_NAME = '默认密码库';
 
 /**
  * 默认密码库管理器 - 专门处理默认密码库的检测和创建
