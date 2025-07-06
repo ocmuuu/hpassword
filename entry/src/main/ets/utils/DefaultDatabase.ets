@@ -70,6 +70,12 @@ export class DefaultDatabase {
       
       // 创建新数据库（使用AES-KDF，60轮加密）
       const createResult = await kdbxCore.createNew(password, DEFAULT_DATABASE_DISPLAY_NAME);
+      // 为软删除功能提前创建回收站
+      if (createResult.success && createResult.data) {
+        // createNew 返回的 data 已经是 Kdbx 实例
+        const dbForRecycle = createResult.data;
+        dbForRecycle.createRecycleBin();
+      }
       if (!createResult.success || !createResult.data) {
         return {
           success: false,
@@ -139,6 +145,14 @@ export class DefaultDatabase {
         password: password,
         validateIntegrity: true
       });
+
+      // 确保回收站存在
+      if (loadResult.success) {
+        const dbOpened = kdbxCore.getDatabase();
+        if (dbOpened) {
+          dbOpened.createRecycleBin();
+        }
+      }
 
       if (!loadResult.success) {
         return {

@@ -225,17 +225,27 @@ export class KdbxEntryManager {
         };
       }
 
-      // 从父组中移除条目
-      const entryIndex = parentGroup.entries.indexOf(entry);
-      if (entryIndex === -1) {
-        return {
-          success: false,
-          error: '条目不在父组中',
-          errorCode: 'ENTRY_NOT_IN_GROUP'
-        };
+      if (parentGroup.uuid.id === this.database.meta.recycleBinUuid?.id) {
+        return { success: false, error: '禁止删除回收站', errorCode: 'CANNOT_DELETE_RECYCLE_BIN' };
       }
 
-      parentGroup.entries.splice(entryIndex, 1);
+      const inRecycle = this.isInRecycleBin(parentGroup);
+
+      if (!inRecycle) {
+        // 软删除：移动到回收站
+        this.database.remove(entry);
+      } else {
+        // 真正删除（仅限回收站内部）
+        const entryIndex = parentGroup.entries.indexOf(entry);
+        if (entryIndex === -1) {
+          return {
+            success: false,
+            error: '条目不在父组中',
+            errorCode: 'ENTRY_NOT_IN_GROUP'
+          };
+        }
+        parentGroup.entries.splice(entryIndex, 1);
+      }
 
       // 标记数据库已修改
       this.markModified();
@@ -662,6 +672,24 @@ export class KdbxEntryManager {
       this.database.meta.settingsChanged = new Date();
       this.database.meta.headerHash = undefined; // 触发完整序列化
     }
+  }
+
+  /**
+   * 判断给定组是否位于回收站中
+   */
+  private isInRecycleBin(group?: KdbxGroup): boolean {
+    if (!this.database || !group) {
+      return false;
+    }
+    const recycleUuid = this.database.meta?.recycleBinUuid;
+    let current: KdbxGroup | undefined = group;
+    while (current) {
+      if (recycleUuid && current.uuid.id === recycleUuid.id) {
+        return true;
+      }
+      current = current.parentGroup;
+    }
+    return false;
   }
 }
 

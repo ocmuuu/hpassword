@@ -278,6 +278,28 @@ export class KdbxGroupManager {
         };
       }
 
+      const inRecycle = this.isInRecycleBin(group);
+
+      if (!inRecycle) {
+        // 软删除：移动到回收站
+        this.database.remove(group);
+        this.markModified();
+
+        hilog.info(0, TAG, '组移动到回收站: %{public}s', group.uuid.id);
+
+        if (this.onEvent) {
+          const eventData: EventData = {
+            groupId: group.uuid.id,
+            name: group.name || '',
+            parentGroupId: parentGroup.uuid.id,
+            action: 'moved_to_recycle_bin'
+          };
+          this.onEvent(DatabaseEventType.GROUP_DELETED, eventData);
+        }
+
+        return { success: true };
+      }
+
       // 检查组是否为空
       if (group.entries.length > 0 || group.groups.length > 0) {
         return {
@@ -359,7 +381,34 @@ export class KdbxGroupManager {
         };
       }
 
-      // 统计要删除的内容
+      const inRecycleRec = this.isInRecycleBin(group);
+
+      if (!inRecycleRec) {
+        // 软删除（递归移动整个组到回收站）
+        const stats = this.countGroupContents(group);
+        this.database.remove(group);
+        this.markModified();
+
+        hilog.info(0, TAG, '组递归移动到回收站: %{public}s (包含 %{public}d 个条目, %{public}d 个子组)',
+          group.uuid.id, stats.entries, stats.groups - 1);
+
+        if (this.onEvent) {
+          const eventData: EventData = {
+            groupId: group.uuid.id,
+            name: group.name || '',
+            parentGroupId: parentGroup.uuid.id,
+            recursive: true,
+            deletedEntries: stats.entries,
+            deletedGroups: stats.groups,
+            action: 'moved_to_recycle_bin'
+          };
+          this.onEvent(DatabaseEventType.GROUP_DELETED, eventData);
+        }
+
+        return { success: true };
+      }
+
+      // 统计要删除的内容（硬删除路径）
       const stats = this.countGroupContents(group);
       
       // 从父组中移除
@@ -806,6 +855,24 @@ export class KdbxGroupManager {
       this.database.meta.settingsChanged = new Date();
       this.database.meta.headerHash = undefined; // 触发完整序列化
     }
+  }
+
+  /**
+   * 判断某组是否位于回收站
+   */
+  private isInRecycleBin(group?: KdbxGroup): boolean {
+    if (!this.database || !group) {
+      return false;
+    }
+    const recycleUuid = this.database.meta?.recycleBinUuid;
+    let current: KdbxGroup | undefined = group;
+    while (current) {
+      if (recycleUuid && current.uuid.id === recycleUuid.id) {
+        return true;
+      }
+      current = current.parentGroup;
+    }
+    return false;
   }
 }
 
