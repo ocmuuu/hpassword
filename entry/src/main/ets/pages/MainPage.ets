@@ -77,6 +77,7 @@ struct MainPage {
   @State private renderFields: RenderField[] = [] // 供 UI 直接渲染的字段数据
   @State private hoverEntryId: string | null = null  // 鼠标悬停的条目ID
   @State private hoverFieldKey: string | null = null  // 详情面板悬停字段Key
+  @State private searchQuery: string = ''  // 条目搜索关键字
   
   // 布局状态
   @State private isFirstColumnCollapsed: boolean = false
@@ -87,6 +88,10 @@ struct MainPage {
   // 加载状态
   @State private isLoading: boolean = false
   @State private error: string | null = null
+  
+  // 自动超时相关
+  private autoCloseTimer: number | null = null
+  private readonly AUTO_CLOSE_TIMEOUT = 600000  // 10分钟自动关闭
 
   async aboutToAppear() {
     try {
@@ -127,6 +132,9 @@ struct MainPage {
       }
       
       this.isInitialized = true
+      
+      // 启动自动关闭计时器
+      this.startAutoCloseTimer()
     } catch (error) {
       this.error = `初始化失败: ${error}`
       this.isInitialized = true
@@ -194,7 +202,7 @@ struct MainPage {
     fixedItems.push({
       id: 'all_entries',
       title: '所有条目',
-      icon: $r('app.media.startIcon'),
+      icon: $r('app.media.all'),
       type: 'special',
       count: await this.getTotalEntryCount()
     })
@@ -202,7 +210,7 @@ struct MainPage {
     fixedItems.push({
       id: 'starred',
       title: '加星条目',
-      icon: $r('app.media.startIcon'),
+      icon: $r('app.media.star'),
       type: 'special',
       count: await this.getStarredEntryCount()
     })
@@ -516,6 +524,9 @@ struct MainPage {
    * 侧边栏项目点击处理
    */
   private async onSidebarItemClick(item: SidebarItem) {
+    // 重置自动关闭计时器
+    this.resetAutoCloseTimer()
+    
     // 分割线不可点击
     if (item.type === 'divider') {
       return
@@ -538,6 +549,9 @@ struct MainPage {
    * 条目项目点击处理
    */
   private onEntryItemClick(entry: EntryItem) {
+    // 重置自动关闭计时器
+    this.resetAutoCloseTimer()
+    
     this.selectedEntryId = entry.id
     this.selectedEntry = entry
     // 重置密码可见性状态
@@ -550,6 +564,9 @@ struct MainPage {
    * 切换第一栏折叠状态
    */
   private onToggleFirstColumn() {
+    // 重置自动关闭计时器
+    this.resetAutoCloseTimer()
+    
     this.isFirstColumnCollapsed = !this.isFirstColumnCollapsed
     
          // 保存状态
@@ -561,7 +578,7 @@ struct MainPage {
   /**
    * 返回首页：保存并关闭数据库，跳转到 Index 页面并重置密码输入
    */
-  private async onBackToHome() {
+  private async returnToIndex() {
     try {
       // 先尝试保存数据库（忽略保存失败不阻止返回）
       await this.saveDatabaseToFile();
@@ -576,6 +593,16 @@ struct MainPage {
     router.replaceUrl({
       url: 'pages/Index'
     });
+  }
+
+  /**
+   * 返回首页：保存并关闭数据库，跳转到 Index 页面并重置密码输入
+   */
+  private async onBackToHome() {
+    // 清除自动关闭计时器（用户主动返回）
+    this.clearAutoCloseTimer()
+    
+    await this.returnToIndex()
   }
 
   /**
@@ -617,6 +644,7 @@ struct MainPage {
       .width('100%')
       .height(40)
       .padding({ left: 16, right: 16 })
+      .margin({ top: item.id === 'all_entries' ? 12 : 0, bottom: item.id === 'starred' ? 4 : 0 })
       .backgroundColor(this.selectedSidebarId === item.id ? '#f0f7ff' : '#fff')
       .alignItems(VerticalAlign.Center)
     }
@@ -692,10 +720,13 @@ struct MainPage {
               .fillColor(this.isEntryStarred(this.selectedEntry) ? '#FFD700' : '#666')
           }
           .backgroundColor('transparent')
-          .padding(8)
-          .margin({ right: 8 })
+          .padding(4)
+          .margin({ right: 4 })
           .stateEffect(false)
           .onClick(async () => {
+            // 重置自动关闭计时器
+            this.resetAutoCloseTimer()
+            
             if (this.selectedEntry && this.kdbxEntryManager) {
               const kdbxEntry: ESObject | null = await this.getKdbxEntryById(this.selectedEntry.id);
               if (kdbxEntry) {
@@ -724,10 +755,57 @@ struct MainPage {
               .fillColor('#007AFF')
           }
           .backgroundColor('transparent')
-          .padding(8)
+          .padding(4)
           .stateEffect(false)
+          .margin({ right: 4 })
           .onClick(() => {
+            // 重置自动关闭计时器
+            this.resetAutoCloseTimer()
+            
             // TODO: 实现编辑功能
+          })
+
+          // 删除按钮
+          Button() {
+            Image($r('app.media.trash'))
+              .width(20)
+              .height(20)
+              .fillColor('#ff4444')
+          }
+          .backgroundColor('transparent')
+          .padding(4)
+          .stateEffect(false)
+          .onClick(async () => {
+            // 重置自动关闭计时器
+            this.resetAutoCloseTimer()
+            
+            // 删除条目：移动至回收站
+            if (!this.selectedEntry || !this.kdbxEntryManager) {
+              return
+            }
+
+            // 获取原始 KdbxEntry
+            const kdbxEntry: ESObject | null = await this.getKdbxEntryById(this.selectedEntry.id)
+            if (!kdbxEntry) {
+              return
+            }
+
+            // 调用管理器删除（软删除会移动到回收站）
+            const delResult = this.kdbxEntryManager.deleteEntry(kdbxEntry as ESObject)
+            if (delResult.success) {
+              // 保存数据库
+              await this.saveDatabaseToFile()
+
+              // 重新构建侧边栏数据（更新计数）
+              await this.initializeSidebarItems()
+
+              // 刷新当前列表（若当前视图不是回收站，条目会消失）
+              await this.loadEntriesForSidebar(this.selectedSidebarId || 'all_entries')
+
+              // 清空详情选择
+              this.selectedEntry = null
+              this.selectedEntryId = null
+            }
           })
         }
         .width('100%')
@@ -811,6 +889,9 @@ struct MainPage {
           .padding({ left: 8, right: 8, top: 2, bottom: 2 })
           .opacity(this.hoverFieldKey === label ? 1 : 0)
           .onClick(() => {
+            // 重置自动关闭计时器
+            this.resetAutoCloseTimer()
+            
             // TODO: 实现复制功能
             console.log('复制内容:', value)
           })
@@ -860,6 +941,9 @@ struct MainPage {
           .padding({ left: 6, right: 6, top: 2, bottom: 2 })
           .opacity(this.hoverFieldKey === fieldKey ? 1 : 0)
           .onClick(() => {
+            // 重置自动关闭计时器
+            this.resetAutoCloseTimer()
+            
             // TODO: 实现复制功能
             console.log('复制密码:', value)
           })
@@ -870,6 +954,9 @@ struct MainPage {
           .fontColor('#007AFF')
           .padding({ left: 6, right: 6, top: 4, bottom: 4 })
           .onClick(() => {
+            // 重置自动关闭计时器
+            this.resetAutoCloseTimer()
+            
             if (this.passwordVisible.has(fieldKey)) {
               this.passwordVisible.delete(fieldKey);
             } else {
@@ -916,6 +1003,9 @@ struct MainPage {
           .textAlign(TextAlign.Start)
           .decoration({ type: TextDecorationType.Underline })
           .onClick(() => {
+            // 重置自动关闭计时器
+            this.resetAutoCloseTimer()
+            
             // TODO: 实现URL跳转功能
             console.log('点击链接:', value)
           })
@@ -928,6 +1018,9 @@ struct MainPage {
           .padding({ left: 6, right: 6, top: 2, bottom: 2 })
           .opacity(this.hoverFieldKey === label ? 1 : 0)
           .onClick(() => {
+            // 重置自动关闭计时器
+            this.resetAutoCloseTimer()
+            
             // TODO: 实现复制功能
             console.log('复制链接:', value)
           })
@@ -1161,6 +1254,10 @@ struct MainPage {
             .strokeWidth(3)
             .gesture(
               PanGesture({ direction: PanDirection.Horizontal, fingers: 1 })
+                .onActionStart(() => {
+                  // 重置自动关闭计时器
+                  this.resetAutoCloseTimer()
+                })
                 .onActionUpdate((event: GestureEvent) => {
                   let newFirstWidth = this.firstColumnWidth + event.offsetX
                   newFirstWidth = Math.max(200, Math.min(300, newFirstWidth))
@@ -1176,7 +1273,7 @@ struct MainPage {
 
         // 第二栏：条目列表
         Column() {
-          // 条目列表标题
+          // 条目列表顶部工具栏
           Row() {
             // 折叠/展开按钮
             Image(this.isFirstColumnCollapsed ? $r('app.media.show') : $r('app.media.hide'))
@@ -1187,23 +1284,43 @@ struct MainPage {
                 this.onToggleFirstColumn()
               })
 
-            Text(this.selectedSidebarId ? 
-              (this.sidebarItems.find(item => item.id === this.selectedSidebarId)?.title || '条目列表') : 
-              '条目列表')
-              .fontSize(18)
-              .fontWeight(FontWeight.Medium)
-              .fontColor('#000')
-              .layoutWeight(1)
-              .maxLines(1)
-              .textOverflow({ overflow: TextOverflow.Ellipsis })
-
-            Text(`${this.entryItems.length} 项`)
+            // 搜索框
+            TextInput({ placeholder: '搜索条目', text: this.searchQuery })
+              .placeholderColor('#999')
               .fontSize(14)
-              .fontColor('#666')
+              .border({ width: 1, color: '#ccc' })
+              .borderRadius(4)
+              .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+              .layoutWeight(1)
+              .onChange((value: string) => {
+                // 重置自动关闭计时器
+                this.resetAutoCloseTimer()
+                
+                this.searchQuery = value
+                // TODO: 可在此调用过滤逻辑
+              })
+
+            // 新增按钮
+            Button() {
+              Image($r('app.media.new'))
+                .width(20)
+                .height(20)
+                .fillColor('#007AFF')
+            }
+            .backgroundColor('transparent')
+            .padding(4)
+            .stateEffect(false)
+            .margin({ left: 8 })
+            .onClick(() => {
+              // 重置自动关闭计时器
+              this.resetAutoCloseTimer()
+              
+              // TODO: 实现新增条目功能
+            })
           }
           .width('100%')
           .height(50)
-          .padding({ left: 16, right: 16 })
+          .padding({ left: 16, right: 8 })
           .backgroundColor('#f8f9fa')
           .border({ width: { bottom: 1 }, color: '#e0e0e0' })
 
@@ -1266,6 +1383,10 @@ struct MainPage {
           .strokeWidth(3)
           .gesture(
             PanGesture({ direction: PanDirection.Horizontal, fingers: 1 })
+              .onActionStart(() => {
+                // 重置自动关闭计时器
+                this.resetAutoCloseTimer()
+              })
               .onActionUpdate((event: GestureEvent) => {
                 let newSecondWidth = this.secondColumnWidth + event.offsetX
                 newSecondWidth = Math.max(300, Math.min(450, newSecondWidth))
@@ -1290,5 +1411,54 @@ struct MainPage {
       .height('100%')
       .backgroundColor('#e5e5e5')
     }
+  }
+
+  /**
+   * 启动自动关闭计时器
+   */
+  private startAutoCloseTimer() {
+    // 清除已有计时器
+    this.clearAutoCloseTimer()
+    
+    // 启动新计时器
+    this.autoCloseTimer = setTimeout(() => {
+      this.autoCloseDatabase()
+    }, this.AUTO_CLOSE_TIMEOUT)
+  }
+
+  /**
+   * 重置自动关闭计时器
+   */
+  private resetAutoCloseTimer() {
+    this.startAutoCloseTimer()
+  }
+
+  /**
+   * 清除自动关闭计时器
+   */
+  private clearAutoCloseTimer() {
+    if (this.autoCloseTimer !== null) {
+      clearTimeout(this.autoCloseTimer)
+      this.autoCloseTimer = null
+    }
+  }
+
+  /**
+   * 自动关闭数据库
+   */
+  private async autoCloseDatabase() {
+    try {
+      // 执行与返回按钮相同的逻辑
+      await this.returnToIndex()
+    } catch (error) {
+      console.error('MainPage', '自动关闭数据库失败:', error)
+    }
+  }
+
+  /**
+   * 页面即将消失时清理计时器
+   */
+  aboutToDisappear() {
+    this.clearAutoCloseTimer()
   }
 } 

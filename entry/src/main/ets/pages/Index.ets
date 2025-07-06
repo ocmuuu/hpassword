@@ -19,11 +19,16 @@ struct Index {
   @State isCreating: boolean = false;
   @State isOpening: boolean = false;
   @State testResult: string = '';
+  @State private passwordFocused: boolean = false
   
   private defaultDatabase: DefaultDatabase | null = null;
 
   aboutToAppear() {
     this.checkDatabaseExists();
+    // 页面加载后自动获取焦点
+    setTimeout(() => {
+      this.passwordFocused = true;
+    }, 100);
   }
 
   /**
@@ -270,10 +275,6 @@ struct Index {
             .fontColor('#1976D2')
             .margin({ bottom: 10 })
           
-          Text('密码管理器')
-            .fontSize(16)
-            .fontColor('#666666')
-            .margin({ bottom: 40 })
 
           // 根据数据库是否存在显示不同界面
           if (this.databaseExists) {
@@ -303,6 +304,10 @@ struct Index {
     .width('100%')
     .height('100%')
     .backgroundColor('#F5F5F5')
+    .onClick(() => {
+      // 点击空白处让密码输入框获得焦点
+      this.passwordFocused = !this.passwordFocused;
+    })
   }
 
   /**
@@ -318,6 +323,7 @@ struct Index {
       
       // 密码输入框
       TextInput({ placeholder: '请输入主密码' })
+        .defaultFocus(this.passwordFocused)
         .type(InputType.Password)
         .width('100%')
         .height(50)
@@ -325,7 +331,6 @@ struct Index {
         .borderRadius(8)
         .padding({ left: 16, right: 16 })
         .fontSize(16)
-        .defaultFocus(true)
         .onChange((value: string) => {
           this.password = value;
           this.clearError();
