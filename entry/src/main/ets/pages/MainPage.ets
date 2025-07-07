@@ -4,10 +4,12 @@ import { KdbxQuery } from '../utils/KdbxQuery'
 import { KdbxEntryManager } from '../utils/KdbxEntryManager'
 import { KdbxGroupManager } from '../utils/KdbxGroupManager'
 import { DatabaseFileManager } from '../utils/DatabaseFileManager'
-import { OperationResult, SearchCriteria } from '../utils/KdbxTypes'
-// 移除对 kdbxweb 的依赖，使用内置类型兼容
+import { OperationResult } from '../utils/KdbxTypes'
 import PreferencesUtil from '../utils/PreferencesUtil'
 import { TemplateManager, CategoryTemplate } from '../templates/index'
+import { EntryConverter, EntryItem } from '../utils/EntryConverter'
+import { FieldInfoHelper, FieldInfo, RenderField } from '../templates/FieldInfoHelper'
+import { SearchHelper, SearchState } from '../utils/SearchHelper'
 
 // 侧边栏项目类型
 interface SidebarItem {
@@ -19,33 +21,6 @@ interface SidebarItem {
   parentId?: string
 }
 
-// 字段信息类型
-interface FieldInfo {
-  label: string
-  isProtected: boolean
-}
-
-// 渲染字段信息，在 UI 构建阶段只做纯渲染
-interface RenderField {
-  key: string
-  label: string
-  value: string
-  type: 'password' | 'url' | 'text'
-}
-
-// 条目项目类型
-interface EntryItem {
-  id: string
-  title: string
-  username: string
-  notes: string
-  url: string
-  icon: Resource
-  lastModified: string
-  groupId?: string
-  groupName?: string  // 添加组名信息，用于获取模板
-  fields?: Map<string, string>  // 存储所有字段的键值对
-}
 
 @Entry
 @Component
@@ -70,9 +45,16 @@ struct MainPage {
   @State private updateCounter: number = 0 // 强制更新计数器
   @State private hoverEntryId: string | null = null  // 鼠标悬停的条目ID
   @State private hoverFieldKey: string | null = null  // 详情面板悬停字段Key
-  @State private searchQuery: string = ''  // 条目搜索关键字
-  @State private filteredEntryItems: EntryItem[] = []  // 搜索过滤后的条目列表
-  @State private isSearching: boolean = false  // 是否正在搜索状态
+  
+  // 搜索状态（由 SearchHelper 管理）
+  @State private searchState: SearchState = {
+    query: '',
+    isSearching: false,
+    results: []
+  }
+  
+  // 搜索助手
+  private searchHelper: SearchHelper = new SearchHelper()
   
   // 布局状态
   @State private isFirstColumnCollapsed: boolean = false
@@ -87,10 +69,6 @@ struct MainPage {
   // 自动超时相关
   private autoCloseTimer: number | null = null
   private readonly AUTO_CLOSE_TIMEOUT = 600000  // 10分钟自动关闭
-  
-  // 搜索防抖相关
-  private searchTimer: number | null = null
-  private readonly SEARCH_DEBOUNCE_DELAY = 300  // 搜索防抖延迟300ms
 
   async aboutToAppear() {
     try {
@@ -129,6 +107,11 @@ struct MainPage {
       } else {
         this.error = '数据库实例获取失败'
       }
+      
+      // 设置搜索助手的回调
+      this.searchHelper.setCallback((state: SearchState) => {
+        this.searchState = state
+      })
       
       this.isInitialized = true
       
@@ -233,7 +216,6 @@ struct MainPage {
         for (const group of groupsResult.data) {
           const isRecycleBin = group.name === 'Recycle Bin'
           const groupName = group.name || '未命名'
-          const entryCount = await this.getGroupEntryCount(group.uuid.id)
           
           if (isRecycleBin) {
             // 暂存回收站分组，稍后添加到最后
@@ -241,8 +223,7 @@ struct MainPage {
               id: group.uuid.id,
               title: '回收站',
               icon: $r('app.media.trash'),
-              type: 'recycle',
-              count: entryCount
+              type: 'recycle'
             } as SidebarItem
             continue
           }
@@ -253,13 +234,20 @@ struct MainPage {
           // 过滤逻辑：
           // 1. 非系统模板分组始终显示
           // 2. 系统模板分组只有在有条目时才显示
-          if (!isSystemTemplate || entryCount > 0) {
+          let shouldShow = true
+          if (isSystemTemplate) {
+            // 检查该分组是否有条目
+            const groupResult = await this.kdbxQuery.getEntriesByGroup(group.uuid.id)
+            const hasEntries = !!(groupResult.success && groupResult.data && groupResult.data.length > 0)
+            shouldShow = hasEntries
+          }
+          
+          if (shouldShow) {
             scrollableItems.push({
               id: group.uuid.id,
               title: groupName,
-              icon: this.getTemplateIcon(groupName), // 根据模板分类获取图标
-              type: 'group',
-              count: entryCount
+              icon: EntryConverter.getTemplateIcon(groupName), // 根据模板分类获取图标
+              type: 'group'
             })
           }
         }
@@ -322,52 +310,9 @@ struct MainPage {
              // 转换为UI显示格式
        const mappedItems: EntryItem[] = entries.map((entryRaw: ESObject) => {
          const entry: ESObject = entryRaw as ESObject;
-         const entryFields = entry.fields as Map<string, Object>;
-         
-         // 提取所有字段
-         const fields = new Map<string, string>();
-         entryFields.forEach((value, key) => {
-           const fieldValue = this.getFieldValue(entryFields, key);
-           if (fieldValue && fieldValue.trim().length > 0) {
-             fields.set(key, fieldValue);
-           }
-         });
-         
-         // 添加时间信息
-         const lastModTime = ((entry.times as ESObject).lastModTime as Date) || new Date();
-         fields.set('修改时间', this.formatDate(lastModTime));
-         
-         const creationTime = ((entry.times as ESObject).creationTime as Date);
-         if (creationTime) {
-           fields.set('创建时间', this.formatDate(creationTime));
-         }
-         
-         // 检查是否已加星
-         const isStarred = this.kdbxEntryManager ? this.kdbxEntryManager.isEntryStarred(entry as ESObject) : false;
-         fields.set('Starred', isStarred ? 'true' : 'false');
-         
-         // 提取tags信息
-         const tags = (entry.tags as string[]) || [];
-         if (tags.length > 0) {
-           fields.set('Tags', tags.join(','));
-         }
-         
-         // 获取组名
-         const groupName = entry.parentGroup ? ((entry.parentGroup as ESObject).name as string) : '';
-         
-         return ({
-           id: (entry.uuid as ESObject).id as string,
-           title: this.getFieldValue(entryFields, 'Title') || '无标题',
-           username: this.getFieldValue(entryFields, 'UserName') || '',
-           notes: this.getFieldValue(entryFields, 'Notes') || '',
-           url: this.getFieldValue(entryFields, 'URL') || '',
-           icon: this.getTemplateIcon(groupName), // 根据模板分类获取图标
-           lastModified: this.formatDate(lastModTime),
-           groupId: entry.parentGroup ? ((entry.parentGroup as ESObject).uuid as ESObject).id as string : '',
-           groupName: groupName,
-           fields: fields
-         }) as EntryItem;
-       })
+         const entryItem = EntryConverter.convertKdbxEntryToEntryItem(entry, undefined, this.kdbxEntryManager ?? undefined);
+         return entryItem;
+       }).filter(item => item !== null) as EntryItem[];
        this.entryItems = mappedItems
       
     } catch (error) {
@@ -376,308 +321,23 @@ struct MainPage {
   }
 
   /**
-   * 获取统计数据的辅助方法
-   */
-  private async getTotalEntryCount(): Promise<number> {
-    if (!this.kdbxQuery) return 0
-    const result = await this.kdbxQuery.getAllEntries()
-    return result.success && result.data ? result.data.length : 0
-  }
-
-  private async getStarredEntryCount(): Promise<number> {
-    if (!this.kdbxQuery) return 0
-    const result = await this.kdbxQuery.getStarredEntries()
-    return result.success && result.data ? result.data.length : 0
-  }
-
-  private async getRecentlyModifiedCount(): Promise<number> {
-    if (!this.kdbxQuery) return 0
-    const result = await this.kdbxQuery.getRecentlyModifiedEntries()
-    return result.success && result.data ? result.data.length : 0
-  }
-
-  private async getGroupEntryCount(groupId: string): Promise<number> {
-    if (!this.kdbxQuery) return 0
-    const result = await this.kdbxQuery.getEntriesByGroup(groupId)
-    return result.success && result.data ? result.data.length : 0
-  }
-
-  private async getRecycleBinCount(): Promise<number> {
-    if (!this.kdbxQuery) return 0
-    const result = await this.kdbxQuery.getRecycleBinEntries()
-    return result.success && result.data ? result.data.length : 0
-  }
-
-  /**
-   * 获取字段值（处理ProtectedValue）
-   */
-  private getFieldValue(fields: Map<string, Object>, key: string): string {
-    const rawValue = fields.get(key)
-    if (!rawValue) {
-      return ''
-    }
-
-    // 尝试读取受保护值
-    if (typeof rawValue === 'object' && (rawValue as ESObject).getText) {
-      return (rawValue as ESObject).getText() as string
-    }
-
-    return rawValue.toString()
-  }
-
-  /**
-   * 格式化日期
-   */
-  private formatDate(date: Date): string {
-    return `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}-${date.getDate().toString().padStart(2, '0')}`
-  }
-
-  /**
-   * 根据组名获取对应的模板
-   */
-  private getTemplateByGroupName(groupName: string): CategoryTemplate | undefined {
-    return TemplateManager.getTemplateByGroupName(groupName);
-  }
-
-  /**
-   * 获取字段的显示信息（标签和是否敏感）
-   */
-  private getFieldInfo(fieldKey: string, groupName?: string): FieldInfo {
-    // 特殊处理时间字段
-    if (fieldKey === '修改时间' || fieldKey === '创建时间') {
-      return { label: fieldKey, isProtected: false };
-    }
-    
-    // 尝试从模板中获取字段信息
-    if (groupName) {
-      const template = this.getTemplateByGroupName(groupName);
-      if (template) {
-        // 先尝试精确匹配
-        let fieldSpec = template.fields.find(field => field.key === fieldKey);
-        
-        // 如果精确匹配失败，尝试大小写不敏感匹配
-        if (!fieldSpec) {
-          fieldSpec = template.fields.find(field => 
-            field.key.toLowerCase() === fieldKey.toLowerCase()
-          );
-        }
-        
-        if (fieldSpec) {
-          return { 
-            label: fieldSpec.label, 
-            isProtected: fieldSpec.protected === true 
-          };
-        }
-      }
-    }
-    
-    // 通用字段名称映射（用于无法匹配模板的字段，如回收站条目）
-    const commonFieldNames: Record<string, string> = {
-      // 基础通用字段
-      'Title': '标题',
-      'UserName': '用户名', 
-      'Password': '密码',
-      'URL': '网址',
-      'Notes': '备注',
-      'Tags': '标签',
-      'Starred': '收藏',
-      
-      // 身份相关（通用含义）
-      'Name': '名称',
-      'ID': '标识符',
-      'Passport': '护照号',
-      'Email': '邮箱',
-      'Phone': '电话',
-      'Address': '地址',
-      'Company': '公司',
-      'JobTitle': '职位',
-      'Birthday': '生日',
-      'Relation': '关系',
-      'RealName': '实名',
-      'MedicalID': '医保卡号',
-      'Nationality': '国籍',
-      
-      // 金融相关（通用含义）
-      'AccountNumber': '账号',
-      'BankName': '银行',
-      'CardNumber': '卡号',
-      'CVV': '安全码',
-      'Expiry': '有效期',
-      'ExpiryDate': '有效期',
-      'PolicyNumber': '保单号',
-      'Coverage': '保障范围',
-      'Premium': '保费',
-      'Beneficiary': '受益人',
-      'AccountType': '账户类型',
-      'IBAN': '国际银行账号',
-      'SwiftCode': 'SWIFT代码',
-      'BranchCode': '分行代码',
-      'PayPassword': '支付密码',
-      'ClaimPhone': '理赔电话',
-      
-      // 证件相关
-      'Number': '证件号码',
-      'IssueDate': '签发日期',
-      'Issuer': '签发机关',
-      
-      // 医疗相关
-      'Hospital': '医院',
-      'Doctor': '医生',
-      'PatientID': '患者ID',
-      'Diagnosis': '诊断结果',
-      'Treatment': '治疗方案',
-      'Date': '日期',
-      
-      // 车辆相关
-      'Brand': '品牌',
-      'Model': '型号',
-      'VIN': 'VIN',
-      'Plate': '车牌号',
-      'Color': '颜色',
-      'PurchaseDate': '购买日期',
-      'Insurance': '保险到期',
-      'MaintenanceDate': '下次保养日期',
-      
-      // 技术相关
-      'Host': '主机',
-      'Port': '端口',
-      'Protocol': '协议',
-      'Server': '服务器',
-      'Database': '数据库',
-      'API_Key': 'API密钥',
-      'SecretKey': '密钥',
-      'PrivateKey': '私钥',
-      'Certificate': '证书',
-      'License': '许可证',
-      'Key': 'API Key',
-      'Secret': 'API Secret',
-      'BaseURL': '基础URL',
-      'Documentation': '文档链接',
-      'RateLimit': '速率限制',
-      
-      // 软件相关
-      'LicenseKey': '许可证密钥',
-      'RegisteredEmail': '授权邮箱',
-      'MaxDevices': '最大设备数',
-      
-      // 加密货币相关
-      'Seed': '助记词',
-      'Network': '网络/链',
-      'Balance': '余额',
-      'CreationDate': '创建日期',
-      
-      // 其他常见字段
-      'Website': '网站',
-      'Description': '描述',
-      'Comment': '注释',
-      'Category': '分类',
-      'Type': '类型',
-      'Status': '状态',
-      'Version': '版本',
-      'Location': '位置',
-      'Region': '所在地区',
-      'Level': '等级',
-      'Plan': '套餐',
-      'RenewDate': '续费日期',
-      'MemberID': '会员号',
-      'Points': '积分'
-    };
-    
-    // 通过关键词判断是否为敏感字段
-    const sensitiveKeywords = ['password', 'pwd', 'key', 'secret', 'token', 'seed', 'private', 'cvv', 'pin'];
-    const isProtected = sensitiveKeywords.some(keyword => 
-      fieldKey.toLowerCase().includes(keyword.toLowerCase())
-    );
-    
-    // 先尝试精确匹配
-    let fieldLabel = commonFieldNames[fieldKey];
-    
-    // 如果精确匹配失败，尝试大小写不敏感匹配
-    if (!fieldLabel) {
-      const matchedKey = Object.keys(commonFieldNames).find(key => 
-        key.toLowerCase() === fieldKey.toLowerCase()
-      );
-      if (matchedKey) {
-        fieldLabel = commonFieldNames[matchedKey];
-      }
-    }
-    
-    return {
-      label: fieldLabel || fieldKey,
-      isProtected
-    };
-  }
-
-  /**
    * 处理字段排序逻辑
    */
   private processSortedFields() {
     if (!this.selectedEntry?.fields) {
       this.sortedFields = [];
+      this.renderFields = [];
       return;
     }
 
-    // 获取所有有值的字段
-    const allFields: string[] = [];
-    this.selectedEntry.fields.forEach((value, key) => {
-      if (value && value.trim().length > 0) {
-        allFields.push(key);
-      }
-    });
+    // 使用 FieldInfoHelper 进行字段处理
+    this.renderFields = FieldInfoHelper.processSortedFields(
+      this.selectedEntry.fields,
+      this.selectedEntry.groupName
+    );
 
-    // 定义优先显示的字段顺序
-    const priorityFields = [
-      'Title', 'UserName', 'Password', 'URL', 'Email', 'Phone',
-      'PayPassword', 'FundPassword', 'BankName', 'AccountNumber', 
-      'CardNumber', 'ExpiryDate', 'CVV',
-      'Host', 'Port', 'DBName', 'Protocol', 
-      'Address', 'Seed', 'PrivateKey',
-      'Company', 'Department', 'JobTitle', 'Website',
-      'API_Key', 'SecretKey', 'AccessToken', 'RefreshToken',
-      'License', 'SerialNumber', 'ActivationCode',
-      'TOTP', 'Notes', '创建时间', '最后修改时间'
-    ];
-
-    // 按优先级排序字段
-    this.sortedFields = allFields.sort((a, b) => {
-      const aIndex = priorityFields.indexOf(a);
-      const bIndex = priorityFields.indexOf(b);
-      
-      if (aIndex === -1 && bIndex === -1) return a.localeCompare(b);
-      if (aIndex === -1) return 1;
-      if (bIndex === -1) return -1;
-      return aIndex - bIndex;
-    });
-
-    // 生成 renderFields 供 UI 渲染，避免在 build 方法里写逻辑
-    // 创建全新的数组，确保触发响应式更新
-    this.renderFields = [];
-    
-    const newRenderFields: RenderField[] = [];
-    this.sortedFields.forEach(key => {
-      const value = this.selectedEntry!.fields!.get(key) as string | undefined;
-      if (!value || value.trim().length === 0) {
-        return;
-      }
-
-      const fieldInfo: FieldInfo = this.getFieldInfo(key, this.selectedEntry!.groupName);
-      let type: 'password' | 'url' | 'text' = 'text';
-      if (fieldInfo.isProtected) {
-        type = 'password';
-      } else if (key === 'URL' || key === 'Website') {
-        type = 'url';
-      }
-
-      newRenderFields.push({
-        key,
-        label: fieldInfo.label,
-        value,
-        type
-      });
-    });
-
-    // 立即设置新的 renderFields
-    this.renderFields = newRenderFields;
+    // 为了保持兼容性，更新 sortedFields（UI 可能仍然需要这个数组）
+    this.sortedFields = this.renderFields.map(field => field.key);
   }
 
   /**
@@ -693,7 +353,7 @@ struct MainPage {
     }
     
     // 清空搜索状态
-    this.clearSearch()
+    this.searchHelper.clearSearch()
     
     this.selectedSidebarId = item.id
     this.selectedEntryId = null
@@ -720,8 +380,8 @@ struct MainPage {
       this.updateSelectedEntry(entry)
       
       // 如果当前在搜索状态，清除搜索
-      if (this.isSearching) {
-        this.clearSearch()
+      if (this.searchState.isSearching) {
+        this.searchHelper.clearSearch()
         
         // 如果条目有分组信息，异步切换到对应的分组
         if (entry.groupId && entry.groupId !== this.selectedSidebarId) {
@@ -848,7 +508,6 @@ struct MainPage {
     @Builder
   private SidebarItemView(item: SidebarItem) {
     if (item.type === 'divider') {
-      // 分割线
       Divider()
         .strokeWidth(1)
         .color('#e0e0e0')
@@ -885,17 +544,20 @@ struct MainPage {
   @Builder
   private EntryItemView(entry: EntryItem) {
     Row() {
-      Image(entry.icon)
-        .width(20)
-        .height(20)
-        .margin({ right: 12 })
-        .fillColor('#666666')
+      // 在回收站时不显示图标
+      if (!this.isInRecycleBin()) {
+        Image(entry.icon)
+          .width(20)
+          .height(20)
+          .margin({ right: 12 })
+          .fillColor('#666666')
+      }
 
       Column() {
         Text(entry.title)
           .fontSize(16)
           .fontWeight(FontWeight.Medium)
-          .fontColor(this.containsSearchKeyword(entry.title) ? '#007AFF' : '#000')
+          .fontColor(this.searchHelper.containsSearchKeyword(entry.title) ? '#007AFF' : '#000')
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
           .width('100%')
@@ -904,7 +566,7 @@ struct MainPage {
         if (entry.username) {
           Text(entry.username)
             .fontSize(14)
-            .fontColor(this.containsSearchKeyword(entry.username) ? '#007AFF' : '#666')
+            .fontColor(this.searchHelper.containsSearchKeyword(entry.username) ? '#007AFF' : '#666')
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
             .width('100%')
@@ -914,6 +576,7 @@ struct MainPage {
       }
       .layoutWeight(1)
       .alignItems(HorizontalAlign.Start)
+      .margin({ left: this.isInRecycleBin() ? 12 : 0 })
     }
     .width('100%')
     .height(60)
@@ -968,9 +631,6 @@ struct MainPage {
                   if (result.success) {
                     // 保存数据库到文件
                     await this.saveDatabaseToFile();
-                    
-                    // 更新侧边栏的加星数量
-                    await this.updateSidebarStarredCount();
                     
                     // 刷新列表
                     await this.loadEntriesForSidebar(this.selectedSidebarId || 'all_entries');
@@ -1027,13 +687,9 @@ struct MainPage {
               return
             }
 
-            // 调用管理器删除（内部会根据是否在回收站自动选择软删除或硬删除）
-            console.log('MainPage', `正在删除条目: ${this.selectedEntry.title}, 回收站状态: ${this.isInRecycleBin()}`)
             const delResult = this.kdbxEntryManager.deleteEntry(kdbxEntry as ESObject)
             
             if (delResult.success) {
-              console.log('MainPage', '删除操作成功，开始更新UI')
-              // 保存数据库
               await this.saveDatabaseToFile()
 
               // 重新构建侧边栏数据（更新计数）
@@ -1227,79 +883,17 @@ struct MainPage {
   }
 
   /**
-   * 创建URL字段视图（带点击跳转功能）
-   */
-  @Builder
-  private URLFieldView(label: string, value: string) {
-    Column() {
-      Row() {
-        Text(label)
-          .fontSize(16)
-          .fontColor('#666')
-          .fontWeight(FontWeight.Medium)
-          .width(120)
-
-        Text(value)
-          .fontSize(16)
-          .fontColor('#007AFF')
-          .layoutWeight(1)
-          .textAlign(TextAlign.Start)
-          .decoration({ type: TextDecorationType.Underline })
-          .margin({ left: 8 })
-          .onClick(() => {
-            // 重置自动关闭计时器
-            this.resetAutoCloseTimer()
-            
-            // TODO: 实现URL跳转功能
-          })
-
-        Button('复制')
-          .fontSize(12)
-          .backgroundColor('#f0f0f0')
-          .fontColor('#007AFF')
-          .borderRadius(3)
-          .padding({ left: 6, right: 6, top: 2, bottom: 2 })
-          .opacity(this.hoverFieldKey === label ? 1 : 0)
-          .onClick(() => {
-            // 重置自动关闭计时器
-            this.resetAutoCloseTimer()
-            
-            // TODO: 实现复制功能
-          })
-
-      }
-      .width('100%')
-      .padding({ left: 8, right: 8, top: 2, bottom: 2 })
-      .backgroundColor(this.hoverFieldKey === label ? '#f5f5f5' : '#fff')
-      .alignItems(VerticalAlign.Center)
-      .onHover((isHover: boolean) => {
-        this.hoverFieldKey = isHover ? label : (this.hoverFieldKey === label ? null : this.hoverFieldKey)
-      })
-
-      Divider()
-        .strokeWidth(1)
-        .color('#f0f0f0')
-        .margin({ top: 8, bottom: 8 })
-    }
-    .width('100%')
-    .alignItems(HorizontalAlign.Start)
-  }
-
-  /**
    * 渲染单个字段，根据类型选择合适组件
    */
   @Builder
   private RenderFieldItem(field: RenderField) {
     if (field.type === 'password') {
       this.PasswordFieldView(field.label, field.value, field.key)
-    } else if (field.type === 'url') {
-      this.URLFieldView(field.label, field.value)
     } else {
       this.DetailFieldView(field.label, field.value)
     }
   }
 
-  // 已移除 FieldItemView，所有逻辑在 processSortedFields 中完成，UI 只做渲染
 
   /**
    * 判断条目是否已加星
@@ -1323,99 +917,6 @@ struct MainPage {
     }
     
     return false;
-  }
-
-  /**
-   * 根据模板分类名获取对应的图标
-   */
-  private getTemplateIcon(groupName: string): Resource {
-    if (!groupName) {
-      return $r('app.media.Templates_Default')
-    }
-    
-    // 使用TemplateManager获取模板信息
-    const template = TemplateManager.getTemplateByGroupName(groupName)
-    if (!template) {
-      // 用户自己创建的GROUP使用default.png
-      return $r('app.media.Templates_Default')
-    }
-    
-    // 获取英文名称映射
-    const englishNameMapping = TemplateManager.getEnglishNameMapping()
-    let englishName = ''
-    
-    // 查找对应的英文名称
-    const entries = Object.entries(englishNameMapping)
-    for (let i = 0; i < entries.length; i++) {
-      const entry = entries[i]
-      const key = entry[0]
-      const value = entry[1]
-      if (value === template.name) {
-        englishName = key
-        break
-      }
-    }
-    
-    // 如果找不到英文名称，使用模板名称
-    if (!englishName) {
-      englishName = template.name
-    }
-    
-    // 根据英文名称返回对应的图标资源
-    switch (englishName) {
-      case 'Login':
-        return $r('app.media.Templates_Login')
-      case 'SecureNote':
-        return $r('app.media.Templates_SecureNote')
-      case 'BankAccount':
-        return $r('app.media.Templates_BankAccount')
-      case 'PaymentAccount':
-        return $r('app.media.Templates_PaymentAccount')
-      case 'SecuritiesFund':
-        return $r('app.media.Templates_SecuritiesFund')
-      case 'EmailAccount':
-        return $r('app.media.Templates_EmailAccount')
-      case 'MembershipCard':
-        return $r('app.media.Templates_MembershipCard')
-      case 'Subscription':
-        return $r('app.media.Templates_Subscription')
-      case 'AddressBook':
-        return $r('app.media.Templates_AddressBook')
-      case 'Family':
-        return $r('app.media.Templates_Family')
-      case 'Certificate':
-        return $r('app.media.Templates_Certificate')
-      case 'InsurancePolicy':
-        return $r('app.media.Templates_InsurancePolicy')
-      case 'UtilityAccount':
-        return $r('app.media.Templates_UtilityAccount')
-      case 'MedicalRecord':
-        return $r('app.media.Templates_MedicalRecord')
-      case 'LoyaltyProgram':
-        return $r('app.media.Templates_LoyaltyProgram')
-      case 'KeyCertificate':
-        return $r('app.media.Templates_KeyCertificate')
-      case 'Server':
-        return $r('app.media.Templates_Server')
-      case 'Database':
-        return $r('app.media.Templates_Database')
-      case 'IoTDevice':
-        return $r('app.media.Templates_IoTDevice')
-      case 'VehicleInfo':
-        return $r('app.media.Templates_VehicleInfo')
-      case 'Router':
-        return $r('app.media.Templates_Router')
-      case 'ApiCredential':
-        return $r('app.media.Templates_ApiCredential')
-      case 'SoftwareLicense':
-        return $r('app.media.Templates_SoftwareLicense')
-      case 'CryptoWallet':
-        return $r('app.media.Templates_CryptoWallet')
-      case 'Other':
-        return $r('app.media.Templates_Other')
-      default:
-        return $r('app.media.Templates_Default')
-    }
   }
 
   /**
@@ -1463,20 +964,6 @@ struct MainPage {
     }
   }
 
-  /**
-   * 更新侧边栏加星条目的数量
-   */
-  private async updateSidebarStarredCount(): Promise<void> {
-    try {
-      const newStarredCount = await this.getStarredEntryCount();
-      
-      // 直接重新构建侧边栏数据，确保 UI 计数立即刷新
-      await this.initializeSidebarItems();
-      
-    } catch (error) {
-      console.error('MainPage', '更新加星数量失败:', error);
-    }
-  }
 
   build() {
     if (!this.isInitialized) {
@@ -1619,7 +1106,7 @@ struct MainPage {
 
             // 搜索框容器
             Row() {
-              TextInput({ placeholder: '搜索条目', text: this.searchQuery })
+              TextInput({ placeholder: '搜索条目', text: this.searchState.query })
                 .placeholderColor('#999')
                 .fontSize(14)
                 .border({ width: 1, color: '#ccc' })
@@ -1630,13 +1117,14 @@ struct MainPage {
                   // 重置自动关闭计时器
                   this.resetAutoCloseTimer()
                   
-                  this.searchQuery = value
-                  // 执行防抖搜索
-                  this.debounceSearch(value)
+                  // 使用搜索助手进行防抖搜索
+                  if (this.kdbxQuery) {
+                    this.searchHelper.debounceSearch(value, this.kdbxQuery, this.kdbxEntryManager ?? undefined)
+                  }
                 })
 
               // 清空搜索按钮
-              if (this.searchQuery) {
+              if (this.searchState.query) {
                 Button() {
                   Text('×')
                     .fontSize(16)
@@ -1649,7 +1137,7 @@ struct MainPage {
                   // 重置自动关闭计时器
                   this.resetAutoCloseTimer()
                   
-                  this.clearSearch()
+                  this.searchHelper.clearSearch()
                 })
               }
             }
@@ -1680,16 +1168,16 @@ struct MainPage {
           .border({ width: { bottom: 1 }, color: '#e0e0e0' })
 
           // 搜索结果统计
-          if (this.isSearching) {
+          if (this.searchState.isSearching) {
             Row() {
-              Text(`搜索结果：${this.filteredEntryItems.length} 个条目`)
+              Text(`搜索结果：${this.searchState.results.length} 个条目`)
                 .fontSize(12)
                 .fontColor('#666')
                 .margin({ left: 16 })
               
               Blank()
               
-              Text(`关键词："${this.searchQuery}"`)
+              Text(`关键词："${this.searchState.query}"`)
                 .fontSize(12)
                 .fontColor('#007AFF')
                 .margin({ right: 16 })
@@ -1720,12 +1208,12 @@ struct MainPage {
                 .opacity(0.3)
                 .margin({ bottom: 12 })
 
-              Text(this.isSearching ? '未找到匹配的条目' : '暂无条目')
+              Text(this.searchState.isSearching ? '未找到匹配的条目' : '暂无条目')
                 .fontSize(16)
                 .fontColor('#999')
                 
-              if (this.isSearching) {
-                Text(`搜索"${this.searchQuery}"无结果`)
+              if (this.searchState.isSearching) {
+                Text(`搜索"${this.searchState.query}"无结果`)
                   .fontSize(14)
                   .fontColor('#ccc')
                   .margin({ top: 8 })
@@ -1853,169 +1341,17 @@ struct MainPage {
    */
   aboutToDisappear() {
     this.clearAutoCloseTimer()
-    this.clearSearchTimer()
-  }
-
-  /**
-   * 清除搜索计时器
-   */
-  private clearSearchTimer() {
-    if (this.searchTimer !== null) {
-      clearTimeout(this.searchTimer)
-      this.searchTimer = null
-    }
-  }
-
-  /**
-   * 防抖搜索
-   */
-  private debounceSearch(query: string) {
-    // 清除之前的计时器
-    this.clearSearchTimer()
-    
-    // 设置新的计时器
-    this.searchTimer = setTimeout(() => {
-      this.performSearch(query)
-    }, this.SEARCH_DEBOUNCE_DELAY)
-  }
-
-  /**
-   * 执行搜索
-   */
-  private async performSearch(query: string) {
-    if (!this.kdbxQuery) {
-      return
-    }
-
-    try {
-      if (!query.trim()) {
-        // 空搜索，显示当前选中侧边栏的所有条目
-        this.isSearching = false
-        this.filteredEntryItems = []
-        return
-      }
-
-      this.isSearching = true
-
-      // 构建搜索条件
-      const searchCriteria: SearchCriteria = {
-        query: query.trim(),
-        searchInTitles: true,
-        searchInUsernames: true,
-        searchInUrls: true,
-        searchInNotes: true,
-        caseSensitive: false,
-        useRegex: false
-      }
-
-      // 执行搜索
-      const searchResult = this.kdbxQuery.searchEntries(searchCriteria)
-      
-      if (searchResult.success && searchResult.data) {
-        // 将搜索结果转换为 EntryItem 格式
-        const searchedItems: EntryItem[] = []
-        
-        for (const result of searchResult.data) {
-          const entryItem = this.convertKdbxEntryToEntryItem(result.entry, result.group)
-          if (entryItem) {
-            searchedItems.push(entryItem)
-          }
-        }
-
-        this.filteredEntryItems = searchedItems
-      } else {
-        this.filteredEntryItems = []
-      }
-
-    } catch (error) {
-      console.error('MainPage', '搜索失败:', error)
-      this.filteredEntryItems = []
-    }
-  }
-
-  /**
-   * 将 KdbxEntry 转换为 EntryItem
-   */
-  private convertKdbxEntryToEntryItem(entry: ESObject, group?: ESObject): EntryItem | null {
-    try {
-      const entryFields = entry.fields as Map<string, Object>;
-      
-      // 提取所有字段
-      const fields = new Map<string, string>();
-      entryFields.forEach((value, key) => {
-        const fieldValue = this.getFieldValue(entryFields, key);
-        if (fieldValue && fieldValue.trim().length > 0) {
-          fields.set(key, fieldValue);
-        }
-      });
-      
-      // 添加时间信息
-      const lastModTime = ((entry.times as ESObject).lastModTime as Date) || new Date();
-      fields.set('修改时间', this.formatDate(lastModTime));
-      
-      const creationTime = ((entry.times as ESObject).creationTime as Date);
-      if (creationTime) {
-        fields.set('创建时间', this.formatDate(creationTime));
-      }
-      
-      // 检查是否已加星
-      const isStarred = this.kdbxEntryManager ? this.kdbxEntryManager.isEntryStarred(entry as ESObject) : false;
-      fields.set('Starred', isStarred ? 'true' : 'false');
-      
-      // 提取tags信息
-      const tags = (entry.tags as string[]) || [];
-      if (tags.length > 0) {
-        fields.set('Tags', tags.join(','));
-      }
-      
-      // 获取组名
-      const groupName = group ? ((group as ESObject).name as string) : (entry.parentGroup ? ((entry.parentGroup as ESObject).name as string) : '');
-      
-      return ({
-        id: (entry.uuid as ESObject).id as string,
-        title: this.getFieldValue(entryFields, 'Title') || '无标题',
-        username: this.getFieldValue(entryFields, 'UserName') || '',
-        notes: this.getFieldValue(entryFields, 'Notes') || '',
-        url: this.getFieldValue(entryFields, 'URL') || '',
-        icon: this.getTemplateIcon(groupName), // 根据模板分类获取图标
-        lastModified: this.formatDate(lastModTime),
-        groupId: group ? ((group as ESObject).uuid as ESObject).id as string : (entry.parentGroup ? ((entry.parentGroup as ESObject).uuid as ESObject).id as string : ''),
-        groupName: groupName,
-        fields: fields
-      }) as EntryItem;
-    } catch (error) {
-      console.error('MainPage', '转换条目失败:', error)
-      return null
-    }
+    this.searchHelper.destroy()
   }
 
   /**
    * 获取当前显示的条目列表（搜索时显示搜索结果，否则显示侧边栏选中的条目）
    */
   private getCurrentDisplayEntries(): EntryItem[] {
-    if (this.isSearching) {
-      return this.filteredEntryItems
+    if (this.searchState.isSearching) {
+      return this.searchState.results
     }
     return this.entryItems
-  }
-
-  /**
-   * 清空搜索
-   */
-  private clearSearch() {
-    this.searchQuery = ''
-    this.isSearching = false
-    this.filteredEntryItems = []
-  }
-
-  /**
-   * 检查文本是否包含搜索关键词（用于高亮显示）
-   */
-  private containsSearchKeyword(text: string): boolean {
-    if (!this.isSearching || !this.searchQuery.trim()) {
-      return false
-    }
-    return text.toLowerCase().includes(this.searchQuery.toLowerCase())
   }
 
   /**

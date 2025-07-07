@@ -538,6 +538,11 @@ export class KdbxQuery {
    * 在组中搜索（递归）
    */
   private searchInGroup(group: KdbxGroup, criteria: SearchCriteria, results: SearchResult[]): void {
+    // 跳过回收站组 - 搜索不应该包含已删除的条目
+    if (group.name === 'Recycle Bin') {
+      return;
+    }
+
     // 搜索当前组的条目
     for (let i = 0; i < group.entries.length; i++) {
       const entry = group.entries[i];
