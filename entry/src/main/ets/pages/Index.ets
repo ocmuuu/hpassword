@@ -4,6 +4,7 @@ import { common } from '@kit.AbilityKit';
 import { DefaultDatabase } from '../utils/DefaultDatabase';
 import { KdbxCoreManager } from '../utils/KdbxCore';
 import { runDatabaseCRUDTest } from '../test/DatabaseCRUDTest';
+import { KDF_ROUNDS_PRESETS, DEFAULT_KDF_ROUNDS, getSecurityLevelName, KdfRoundsPreset } from '../utils/KdbxConstants';
 import fs from '@ohos.file.fs';
 
 const TAG = 'IndexPage';
@@ -19,6 +20,10 @@ struct Index {
   @State isCreating: boolean = false;
   @State isOpening: boolean = false;
   @State testResult: string = '';
+  @State creationProgress: string = '';
+  @State openingProgress: string = '';
+  @State selectedKdfRounds: number = DEFAULT_KDF_ROUNDS;
+  @State showAdvancedOptions: boolean = false;
   @State private passwordFocused: boolean = false
   
   private defaultDatabase: DefaultDatabase | null = null;
@@ -96,6 +101,7 @@ struct Index {
     this.isCreating = true;
     this.errorMessage = '';
     this.testResult = '';
+    this.creationProgress = '正在初始化...';
 
     try {
       hilog.info(0, TAG, '开始创建默认数据库...');
@@ -103,15 +109,22 @@ struct Index {
       // 初始化DefaultDatabase实例
       this.initializeDefaultDatabase();
       
+      // 更新进度
+      const securityLevelName = getSecurityLevelName(this.selectedKdfRounds);
+      this.creationProgress = `正在生成密码库加密密钥（${securityLevelName}级别，${this.selectedKdfRounds}轮）...`;
+      await new Promise<void>((resolve) => setTimeout(resolve, 100)); // 让UI更新
+      
       // 使用DefaultDatabase创建数据库
-      const result = await this.defaultDatabase!.create(this.password);
+      const result = await this.defaultDatabase!.create(this.password, this.selectedKdfRounds);
       
       if (!result.success) {
         this.errorMessage = result.error || '创建数据库失败';
         return;
       }
 
-      hilog.info(0, TAG, '默认数据库创建成功 - AES-KDF加密，60轮');
+      const securityLevel = getSecurityLevelName(this.selectedKdfRounds);
+      hilog.info(0, TAG, `默认数据库创建成功 - AES-KDF加密，${this.selectedKdfRounds}轮（${securityLevel}级别）`);
+      this.creationProgress = '密码库创建完成，正在验证...';
       
       // 重新打开数据库并跳转到主界面
       const openResult = await this.defaultDatabase!.open(this.password);
@@ -127,6 +140,7 @@ struct Index {
       
       // 执行完整的CRUD测试
       hilog.info(0, TAG, '开始执行数据库CRUD测试...');
+      this.creationProgress = '正在执行数据库功能测试...';
       this.testResult = '正在执行数据库增删改查测试...';
       
       const context = getContext() as common.UIAbilityContext;
@@ -135,6 +149,7 @@ struct Index {
       if (testSuccess) {
         hilog.info(0, TAG, '数据库CRUD测试全部通过');
         this.testResult = '✓ 数据库增删改查测试全部通过！';
+        this.creationProgress = '正在保存测试数据...';
         
         // 额外确保数据保存到默认数据库
         try {
@@ -143,20 +158,25 @@ struct Index {
           if (finalSaveResult.success) {
             hilog.info(0, TAG, '测试数据最终保存成功');
             this.testResult = '✓ 数据库增删改查测试完成，数据已保存！';
+            this.creationProgress = '密码库创建完成！';
           } else {
             hilog.error(0, TAG, '测试数据最终保存失败: %{public}s', finalSaveResult.error);
             this.testResult = '⚠ 测试通过但保存失败，数据可能丢失';
+            this.creationProgress = '保存数据时出现问题';
           }
         } catch (saveError) {
           hilog.error(0, TAG, '最终保存时发生异常: %{public}s', (saveError as Error).message);
           this.testResult = '⚠ 测试通过但保存时出现异常';
+          this.creationProgress = '保存数据时出现异常';
         }
       } else {
         hilog.error(0, TAG, '数据库CRUD测试失败');
         this.testResult = '✗ 数据库增删改查测试失败，请查看日志';
+        this.creationProgress = '数据库测试失败';
       }
       
       // 等待3秒让用户看到测试结果
+      this.creationProgress = '即将跳转到主界面...';
       await new Promise<void>((resolve) => setTimeout(resolve, 3000));
       
       // 跳转到主界面
@@ -167,8 +187,10 @@ struct Index {
     } catch (error) {
       hilog.error(0, TAG, '创建数据库异常: %{public}s', (error as Error).message);
       this.errorMessage = '创建数据库时发生错误: ' + (error as Error).message;
+      this.creationProgress = '创建失败';
     } finally {
       this.isCreating = false;
+      this.creationProgress = '';
     }
   }
 
@@ -183,6 +205,7 @@ struct Index {
 
     this.isOpening = true;
     this.errorMessage = '';
+    this.openingProgress = '正在验证密码...';
 
     try {
       hilog.info(0, TAG, '开始打开默认数据库...');
@@ -191,6 +214,7 @@ struct Index {
       this.initializeDefaultDatabase();
       
       // 使用DefaultDatabase打开数据库
+      this.openingProgress = '正在解密数据库...';
       const result = await this.defaultDatabase!.open(this.password);
 
       if (!result.success) {
@@ -199,6 +223,7 @@ struct Index {
       }
 
       hilog.info(0, TAG, '数据库打开成功');
+      this.openingProgress = '正在初始化界面...';
       
       // 设置全局KdbxCore实例
       if (result.data) {
@@ -213,8 +238,10 @@ struct Index {
     } catch (error) {
       hilog.error(0, TAG, '打开数据库异常: %{public}s', (error as Error).message);
       this.errorMessage = '打开数据库时发生错误: ' + (error as Error).message;
+      this.openingProgress = '打开失败';
     } finally {
       this.isOpening = false;
+      this.openingProgress = '';
     }
   }
 
@@ -354,17 +381,30 @@ struct Index {
         })
       
       if (this.isOpening) {
-        Row() {
-          LoadingProgress()
-            .width(20)
-            .height(20)
-            .margin({ right: 10 })
+        Column() {
+          Row() {
+            LoadingProgress()
+              .width(20)
+              .height(20)
+              .margin({ right: 10 })
+            
+            Text('正在打开密码库...')
+              .fontSize(14)
+              .fontColor('#666666')
+          }
+          .margin({ top: 20 })
           
-          Text('正在打开密码库...')
-            .fontSize(14)
-            .fontColor('#666666')
+          // 显示打开进度
+          if (this.openingProgress) {
+            Text(this.openingProgress)
+              .fontSize(12)
+              .fontColor('#999999')
+              .margin({ top: 5 })
+              .textAlign(TextAlign.Center)
+          }
         }
-        .margin({ top: 20 })
+        .width('100%')
+        .alignItems(HorizontalAlign.Center)
       }
     }
     .width('100%')
@@ -421,6 +461,94 @@ struct Index {
         })
         .margin({ bottom: 30 })
       
+      // 高级选项按钮
+      Button(this.showAdvancedOptions ? '隐藏高级选项' : '显示高级选项')
+        .width('100%')
+        .height(40)
+        .fontSize(14)
+        .fontWeight(FontWeight.Normal)
+        .backgroundColor('#FFFFFF')
+        .fontColor('#666666')
+        .borderRadius(8)
+        .borderWidth(1)
+        .borderColor('#DDDDDD')
+        .enabled(!this.isCreating)
+        .onClick(() => {
+          this.showAdvancedOptions = !this.showAdvancedOptions;
+        })
+        .margin({ bottom: 20 })
+      
+      // 高级选项面板
+      if (this.showAdvancedOptions) {
+        Column() {
+          Text('安全级别')
+            .fontSize(14)
+            .fontWeight(FontWeight.Medium)
+            .alignSelf(ItemAlign.Start)
+            .margin({ bottom: 10 })
+          
+          // 安全级别选择
+          Column() {
+            ForEach(KDF_ROUNDS_PRESETS, (preset: KdfRoundsPreset) => {
+              Row() {
+                Radio({ value: preset.rounds.toString(), group: 'securityLevel' })
+                  .checked(this.selectedKdfRounds === preset.rounds)
+                  .onChange((isChecked: boolean) => {
+                    if (isChecked) {
+                      this.selectedKdfRounds = preset.rounds;
+                    }
+                  })
+                  .margin({ right: 10 })
+                
+                Column() {
+                  Row() {
+                    Text(preset.name)
+                      .fontSize(14)
+                      .fontWeight(FontWeight.Medium)
+                    
+                    Text(`(${preset.rounds}轮)`)
+                      .fontSize(12)
+                      .fontColor('#666666')
+                      .margin({ left: 5 })
+                  }
+                  .width('100%')
+                  .justifyContent(FlexAlign.SpaceBetween)
+                  
+                  Text(preset.description)
+                    .fontSize(12)
+                    .fontColor('#999999')
+                    .alignSelf(ItemAlign.Start)
+                    .margin({ top: 2 })
+                  
+                  Text(`预计耗时: ${preset.estimatedTime}`)
+                    .fontSize(10)
+                    .fontColor('#999999')
+                    .alignSelf(ItemAlign.Start)
+                    .margin({ top: 2 })
+                }
+                .layoutWeight(1)
+                .alignItems(HorizontalAlign.Start)
+              }
+              .width('100%')
+              .padding(10)
+              .backgroundColor(this.selectedKdfRounds === preset.rounds ? '#E3F2FD' : '#FFFFFF')
+              .borderRadius(8)
+              .margin({ bottom: 8 })
+              .onClick(() => {
+                this.selectedKdfRounds = preset.rounds;
+              })
+            })
+          }
+          .width('100%')
+          .margin({ bottom: 20 })
+        }
+        .width('100%')
+        .padding(15)
+        .backgroundColor('#F8F9FA')
+        .borderRadius(8)
+        .margin({ bottom: 20 })
+      }
+      
       // 创建按钮
       Button('创建密码库')
         .width('100%')
@@ -447,6 +575,15 @@ struct Index {
               .fontColor('#666666')
           }
           .margin({ top: 20 })
+          
+          // 显示创建进度
+          if (this.creationProgress) {
+            Text(this.creationProgress)
+              .fontSize(12)
+              .fontColor('#999999')
+              .margin({ top: 5 })
+              .textAlign(TextAlign.Center)
+          }
           
           // 显示测试结果
           if (this.testResult) {

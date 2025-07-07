@@ -1,7 +1,7 @@
 import { CategoryTemplate } from './TemplateTypes';
 
 export const CryptoWalletTemplate: CategoryTemplate = {
-  name: '加密货币钱包',
+  name: '加密钱包',
   desc: '数字货币地址、助记词或私钥，集中管理区块链资产凭据',
   fields: [
     { key: 'Title', label: '钱包/交易所' },

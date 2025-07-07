@@ -77,14 +77,6 @@ export class DatabaseFileManager {
 
       // 保存数据库为ArrayBuffer
       const arrayBuffer = await database.save();
-
-      // 调试：生成并打印可读XML，帮助定位持久化问题（仅debug日志输出）
-      try {
-        const xmlStr: string = await database.saveXml(true);
-        hilog.debug(0, TAG, '保存的XML:\n%{public}s', xmlStr);
-      } catch (xmlErr) {
-        hilog.error(0, TAG, '生成XML失败: %{public}s', (xmlErr as Error).message);
-      }
       
       // 写入文件
       const filePath = this.getFilePath(fileName);

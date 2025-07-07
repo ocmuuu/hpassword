@@ -4,6 +4,7 @@ import { KdbxCore } from './KdbxCore';
 import { DatabaseFileManager } from './DatabaseFileManager';
 import { OperationResult } from './KdbxTypes';
 import { logOperation, logError } from './KdbxUtils';
+import { DEFAULT_KDF_ROUNDS, getSecurityLevelName } from './KdbxConstants';
 
 const TAG = 'DefaultDatabase';
 const DEFAULT_DATABASE_NAME = 'default.kdbx';
@@ -52,7 +53,7 @@ export class DefaultDatabase {
   /**
    * 创建默认密码库
    */
-  async create(password: string): Promise<OperationResult<string>> {
+  async create(password: string, kdfRounds?: number): Promise<OperationResult<string>> {
     try {
       logOperation('create');
 
@@ -68,8 +69,11 @@ export class DefaultDatabase {
       // 创建KdbxCore实例
       const kdbxCore = new KdbxCore();
       
-      // 创建新数据库（使用AES-KDF，60轮加密）
-      const createResult = await kdbxCore.createNew(password, DEFAULT_DATABASE_DISPLAY_NAME);
+      // 使用传入的轮数或默认值
+      const actualKdfRounds = kdfRounds || DEFAULT_KDF_ROUNDS;
+      
+      // 创建新数据库（使用AES-KDF加密）
+      const createResult = await kdbxCore.createNew(password, DEFAULT_DATABASE_DISPLAY_NAME, actualKdfRounds);
       // 为软删除功能提前创建回收站
       if (createResult.success && createResult.data) {
         // createNew 返回的 data 已经是 Kdbx 实例
@@ -94,7 +98,8 @@ export class DefaultDatabase {
         };
       }
 
-      hilog.info(0, TAG, '默认密码库创建成功 - AES-KDF加密，60轮');
+      const securityLevel = getSecurityLevelName(actualKdfRounds);
+      hilog.info(0, TAG, `默认密码库创建成功 - AES-KDF加密，${actualKdfRounds}轮（${securityLevel}级别）`);
       
       return {
         success: true,

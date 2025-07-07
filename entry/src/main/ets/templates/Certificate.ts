@@ -1,7 +1,7 @@
 import { CategoryTemplate } from './TemplateTypes';
 
 export const CertificateTemplate: CategoryTemplate = {
-  name: '证件',
+  name: '证件证照',
   desc: '身份证、护照、职业资格证等官方证件的编号、发证机关及有效期信息',
   fields: [
     { key: 'Title', label: '证件名称' },

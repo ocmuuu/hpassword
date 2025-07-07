@@ -329,7 +329,8 @@ export interface LoadFromBufferLogParams {
  */
 export interface LoadEventData {
   version: string;
-  size: number;
+  size?: number;
+  isNew?: boolean;
 }
 
 /**
@@ -357,6 +358,7 @@ export interface LogParams {
   compression?: string;
   encryptionRounds?: number;
   backupCount?: number;
+  kdfRounds?: number;
 }
 
 /**

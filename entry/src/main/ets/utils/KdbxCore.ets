@@ -9,9 +9,12 @@ import {
   DatabaseEventListener,
   ResourceManager,
   RawFileEntry,
-  LogParams
+  LogParams,
+  LoadEventData,
+  SaveEventData
 } from './KdbxTypes';
 import { logOperation, logError } from './KdbxUtils';
+import { DEFAULT_KDF_ROUNDS, validateKdfRounds, getSecurityLevelName } from './KdbxConstants';
 
 const TAG = 'KdbxCore';
 
@@ -151,10 +154,11 @@ export class KdbxCore {
       hilog.info(0, TAG, '版本: %{public}s.%{public}s', db.versionMajor.toString(), db.versionMinor.toString());
       
       // 触发加载事件
-      this.emitEvent(DatabaseEventType.DATABASE_LOADED, {
+      const loadEventData: LoadEventData = {
         version: `${db.versionMajor}.${db.versionMinor}`,
         size: arrayBuffer.byteLength
-      });
+      };
+      this.emitEvent(DatabaseEventType.DATABASE_LOADED, loadEventData);
 
       return {
         success: true,
@@ -221,9 +225,10 @@ export class KdbxCore {
       hilog.info(0, TAG, '数据库保存成功，大小: %{public}d 字节', savedData.byteLength);
       
       // 触发保存事件
-      this.emitEvent(DatabaseEventType.DATABASE_SAVED, {
+      const saveEventData: SaveEventData = {
         size: savedData.byteLength
-      });
+      };
+      this.emitEvent(DatabaseEventType.DATABASE_SAVED, saveEventData);
 
       return {
         success: true,
@@ -245,33 +250,48 @@ export class KdbxCore {
   /**
    * 创建新的数据库
    */
-  async createNew(password: string, databaseName?: string): Promise<OperationResult<Kdbx>> {
+  async createNew(password: string, databaseName?: string, kdfRounds?: number): Promise<OperationResult<Kdbx>> {
     try {
+      // 使用传入的轮数或默认值
+      const actualKdfRounds = kdfRounds || DEFAULT_KDF_ROUNDS;
+      
+      // 验证轮数是否有效
+      if (!validateKdfRounds(actualKdfRounds)) {
+        return {
+          success: false,
+          error: `无效的KDF轮数: ${actualKdfRounds}`,
+          errorCode: 'INVALID_KDF_ROUNDS'
+        };
+      }
+      
       const logParams: LogParams = {
-        databaseName: databaseName || '新建数据库'
+        databaseName: databaseName || '新建数据库',
+        kdfRounds: actualKdfRounds
       };
       logOperation('createNew', logParams);
 
       const credentials = new Credentials(ProtectedValue.fromString(password));
       const db = Kdbx.create(credentials, databaseName || '新建数据库');
       
-      // 设置AES-KDF加密算法，60轮加密
+      // 设置AES-KDF加密算法
       db.header.setKdf('ydnzmmKKRGC/dA0IwYpP6g=='); // KdfId.Aes
       if (db.header.kdfParameters) {
-        // 设置加密轮数为60
-        db.header.kdfParameters.set('R', ValueType.UInt64, new Int64(60));
+        // 设置加密轮数
+        db.header.kdfParameters.set('R', ValueType.UInt64, new Int64(actualKdfRounds));
       }
       
       this.database = db;
       this.isLoaded = true;
 
-      hilog.info(0, TAG, '新数据库创建成功 - 使用AES-KDF加密算法，60轮加密');
+      const securityLevel = getSecurityLevelName(actualKdfRounds);
+      hilog.info(0, TAG, `新数据库创建成功 - 使用AES-KDF加密算法，${actualKdfRounds}轮加密（${securityLevel}级别）`);
       
       // 触发加载事件
-      this.emitEvent(DatabaseEventType.DATABASE_LOADED, {
+      const createEventData: LoadEventData = {
         version: '4.0',
         isNew: true
-      });
+      };
+      this.emitEvent(DatabaseEventType.DATABASE_LOADED, createEventData);
 
       return {
         success: true,

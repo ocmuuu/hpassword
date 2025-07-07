@@ -95,9 +95,6 @@ export class DatabaseCRUDTest {
    */
   private onDatabaseEvent(eventType: DatabaseEventType, data?: Record<string, Object>): void {
     hilog.info(0, TAG, '数据库事件: %{public}s', eventType);
-    if (data) {
-      hilog.debug(0, TAG, '事件数据: %{public}s', JSON.stringify(data));
-    }
   }
 
   /**
@@ -221,18 +218,33 @@ export class DatabaseCRUDTest {
 
     const templateNames: string[] = ALL_TEMPLATES.map(t => t.name);
 
-    // 建立模板 -> 允许条目标题集合
+    // 定义保留的分组（测试后只保留这些分组的条目）
+    const preservedGroups: string[] = [
+      '登录密码',
+      '安全笔记',
+      '银行账户',
+      '支付账户',
+      '邮箱账户',
+      '会员卡',
+      '会员订阅'
+    ];
+
+    // 建立模板 -> 允许条目标题集合（仅对保留的分组）
     const templateTitleMap = new Map<string, Set<string>>();
     for (let i = 0; i < ALL_TEMPLATES.length; i++) {
       const tpl = ALL_TEMPLATES[i];
-      const titles = new Set<string>();
-      for (let j = 0; j < tpl.samples.length; j++) {
-        const t = tpl.samples[j]['Title'];
-        if (typeof t === 'string') {
-          titles.add(t);
+      
+      // 只对保留的分组保留示例条目
+      if (preservedGroups.includes(tpl.name)) {
+        const titles = new Set<string>();
+        for (let j = 0; j < tpl.samples.length; j++) {
+          const t = tpl.samples[j]['Title'];
+          if (typeof t === 'string') {
+            titles.add(t);
+          }
         }
+        templateTitleMap.set(tpl.name, titles);
       }
-      templateTitleMap.set(tpl.name, titles);
     }
 
     const groupsResult = this.kdbxQuery.getAllGroups();
@@ -258,10 +270,16 @@ export class DatabaseCRUDTest {
 
       for (const info of entriesResult.data) {
         const title = this.getEntryTitle(info);
-        if (allowedTitles.has(title)) {
-          continue;
+        
+        // 对于保留的分组，只保留示例条目；对于其他分组，删除所有条目
+        if (preservedGroups.includes(gName)) {
+          // 保留的分组：只保留示例条目
+          if (allowedTitles.has(title)) {
+            continue;
+          }
         }
-        // 根据ID获取真实KdbxEntry
+        
+        // 删除非示例条目或非保留分组的所有条目
         const entryLookup = this.kdbxQuery.findEntryById(info.id);
         if (entryLookup.success && entryLookup.data) {
           this.entryManager!.deleteEntry(entryLookup.data);
@@ -269,7 +287,7 @@ export class DatabaseCRUDTest {
       }
     }
 
-    this.testResults.push('✓ 非模板分组/条目清理完成');
+    this.testResults.push(`✓ 测试数据清理完成，保留分组: ${preservedGroups.join(', ')}`);
   }
 
   /**
@@ -739,7 +757,6 @@ export class DatabaseCRUDTest {
         
         const groupInfo = `${group.name || '未命名'}(${count}个条目)`;
         beforeGroupDetails.push(groupInfo);
-        hilog.debug(0, TAG, '分组 %{public}s 有 %{public}d 个条目', group.name || '未命名', count);
       }
     }
     
@@ -833,8 +850,6 @@ export class DatabaseCRUDTest {
         if (count !== beforeCount) {
           hilog.warn(0, TAG, '分组 %{public}s 条目数不一致: 保存前 %{public}d, 重新打开后 %{public}d', 
             group.name || '未命名', beforeCount, count);
-        } else {
-          hilog.debug(0, TAG, '分组 %{public}s 条目数一致: %{public}d', group.name || '未命名', count);
         }
       }
     }
@@ -1079,30 +1094,52 @@ export class DatabaseCRUDTest {
         };
       }
       
-      // 验证是否存在测试条目
-      let foundTestEntries = 0;
+      // 验证保留的分组是否有示例条目
+      const preservedGroups: string[] = [
+        '登录密码',
+        '安全笔记',
+        '银行账户',
+        '支付账户',
+        '邮箱账户',
+        '会员卡',
+        '会员订阅'
+      ];
+      
+      let foundPreservedEntries = 0;
+      let preservedGroupsWithEntries = 0;
+      
       for (const group of allGroups.data) {
-        const entriesResult = this.entryManager.getEntriesInGroup(group.uuid.id);
-        if (entriesResult.success && entriesResult.data) {
-          for (const entry of entriesResult.data) {
-            const entryTitle = this.getEntryTitle(entry);
-            if (entryTitle.includes('测试') || entryTitle.includes('账号')) {
-              foundTestEntries++;
+        const groupName = group.name || '';
+        if (preservedGroups.includes(groupName)) {
+          const entriesResult = this.entryManager.getEntriesInGroup(group.uuid.id);
+          if (entriesResult.success && entriesResult.data) {
+            const entryCount = entriesResult.data.length;
+            if (entryCount > 0) {
+              preservedGroupsWithEntries++;
+              foundPreservedEntries += entryCount;
             }
           }
         }
       }
       
-      if (foundTestEntries === 0) {
+      if (foundPreservedEntries === 0) {
         return {
           success: false,
-          error: '未找到任何测试条目',
-          errorCode: 'NO_TEST_ENTRIES'
+          error: '保留的分组中未找到任何条目',
+          errorCode: 'NO_PRESERVED_ENTRIES'
         };
       }
       
-      hilog.info(0, TAG, '数据验证通过: 找到 %{public}d 个预期分组, %{public}d 个测试条目', 
-        expectedGroups.length, foundTestEntries);
+      if (preservedGroupsWithEntries < 5) {
+        return {
+          success: false,
+          error: `保留的分组中只有 ${preservedGroupsWithEntries} 个分组有条目，预期至少 5 个`,
+          errorCode: 'INSUFFICIENT_PRESERVED_GROUPS'
+        };
+      }
+      
+      hilog.info(0, TAG, '数据验证通过: 找到 %{public}d 个预期分组, %{public}d 个保留分组有条目, 共 %{public}d 个条目', 
+        expectedGroups.length, preservedGroupsWithEntries, foundPreservedEntries);
       
       return {
         success: true
@@ -1232,4 +1269,4 @@ export async function runDatabaseCRUDTest(context: Context, existingKdbxCore?: K
     await test.cleanup();
     return false;
   }
-} 
+}

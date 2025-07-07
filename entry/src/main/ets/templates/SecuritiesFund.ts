@@ -1,7 +1,7 @@
 import { CategoryTemplate } from './TemplateTypes';
 
 export const SecuritiesFundTemplate: CategoryTemplate = {
-  name: '证券 / 基金',
+  name: '证券基金',
   desc: '证券公司交易账号、基金投资平台的交易及资金密码等敏感投资信息',
   fields: [
     { key: 'Title', label: '平台名称' },

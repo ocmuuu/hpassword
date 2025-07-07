@@ -207,19 +207,17 @@ struct MainPage {
     
     // 固定的特殊项目
     fixedItems.push({
-      id: 'all_entries',
-      title: '所有条目',
-      icon: $r('app.media.all'),
-      type: 'special',
-      count: await this.getTotalEntryCount()
+      id: 'starred',
+      title: '加星',
+      icon: $r('app.media.star'),
+      type: 'special'
     })
     
     fixedItems.push({
-      id: 'starred',
-      title: '加星条目',
-      icon: $r('app.media.star'),
-      type: 'special',
-      count: await this.getStarredEntryCount()
+      id: 'all_entries',
+      title: '所有条目',
+      icon: $r('app.media.all'),
+      type: 'special'
     })
     
     // 添加分割线到固定区域
@@ -234,15 +232,57 @@ struct MainPage {
     if (this.kdbxQuery) {
       const groupsResult = await this.kdbxQuery.getAllGroups()
       if (groupsResult.success && groupsResult.data) {
+        // 获取所有系统模板分组名称
+        const systemTemplateNames = [
+          LoginTemplate.name, SecureNoteTemplate.name, BankAccountTemplate.name, PaymentAccountTemplate.name,
+          SecuritiesFundTemplate.name, EmailAccountTemplate.name, MembershipCardTemplate.name, SubscriptionTemplate.name,
+          AddressBookTemplate.name, FamilyTemplate.name, CertificateTemplate.name, InsurancePolicyTemplate.name,
+          UtilityAccountTemplate.name, MedicalRecordTemplate.name, LoyaltyProgramTemplate.name, KeyCertificateTemplate.name,
+          ServerTemplate.name, DatabaseTemplate.name, IoTDeviceTemplate.name, VehicleInfoTemplate.name,
+          RouterTemplate.name, ApiCredentialTemplate.name, SoftwareLicenseTemplate.name, CryptoWalletTemplate.name,
+          OtherTemplate.name
+        ]
+        
+        // 先处理非回收站分组
+        let recycleBinGroup: SidebarItem | null = null
+        
         for (const group of groupsResult.data) {
           const isRecycleBin = group.name === 'Recycle Bin'
-          scrollableItems.push({
-            id: group.uuid.id,
-            title: isRecycleBin ? '回收站' : (group.name || '未命名'),
-            icon: $r('app.media.startIcon'),
-            type: isRecycleBin ? 'recycle' : 'group',
-            count: await this.getGroupEntryCount(group.uuid.id)
-          })
+          const groupName = group.name || '未命名'
+          const entryCount = await this.getGroupEntryCount(group.uuid.id)
+          
+          if (isRecycleBin) {
+            // 暂存回收站分组，稍后添加到最后
+            recycleBinGroup = {
+              id: group.uuid.id,
+              title: '回收站',
+              icon: $r('app.media.trash'),
+              type: 'recycle',
+              count: entryCount
+            } as SidebarItem
+            continue
+          }
+          
+          // 判断是否为系统模板分组
+          const isSystemTemplate = systemTemplateNames.includes(groupName)
+          
+          // 过滤逻辑：
+          // 1. 非系统模板分组始终显示
+          // 2. 系统模板分组只有在有条目时才显示
+          if (!isSystemTemplate || entryCount > 0) {
+            scrollableItems.push({
+              id: group.uuid.id,
+              title: groupName,
+              icon: $r('app.media.startIcon'),
+              type: 'group',
+              count: entryCount
+            })
+          }
+        }
+        
+        // 回收站始终显示在最后
+        if (recycleBinGroup) {
+          scrollableItems.push(recycleBinGroup)
         }
       }
     }
@@ -720,19 +760,11 @@ struct MainPage {
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
 
-        if (item.type === 'special' && item.count !== undefined && item.count > 0) {
-          Text(item.count.toString())
-            .fontSize(12)
-            .fontColor('#fff')
-            .backgroundColor('#007AFF')
-            .borderRadius(10)
-            .padding({ left: 6, right: 6, top: 2, bottom: 2 })
-        }
       }
       .width('100%')
       .height(40)
       .padding({ left: 16, right: 16 })
-      .margin({ top: item.id === 'all_entries' ? 12 : 0, bottom: item.id === 'starred' ? 4 : 0 })
+      .margin({ top: item.id === 'starred' ? 12 : 0, bottom: item.id === 'all_entries' ? 4 : 0 })
       .backgroundColor(this.selectedSidebarId === item.id ? '#f0f7ff' : '#fff')
       .alignItems(VerticalAlign.Center)
     }
@@ -985,11 +1017,10 @@ struct MainPage {
             this.resetAutoCloseTimer()
             
             // TODO: 实现复制功能
-            console.log('复制内容:', value)
           })
       }
       .width('100%')
-      .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+      .padding({ left: 8, right: 8, top: 2, bottom: 2 })
       .backgroundColor(this.hoverFieldKey === label ? '#f5f5f5' : '#fff')
       .alignItems(VerticalAlign.Center)
       .onHover((isHover: boolean) => {
@@ -999,7 +1030,7 @@ struct MainPage {
       Divider()
         .strokeWidth(1)
         .color('#f0f0f0')
-        .margin({ top: 12, bottom: 12 })
+        .margin({ top: 4, bottom: 8 })
     }
     .width('100%')
     .alignItems(HorizontalAlign.Start)
@@ -1037,7 +1068,6 @@ struct MainPage {
             this.resetAutoCloseTimer()
             
             // TODO: 实现复制功能
-            console.log('复制密码:', value)
           })
 
         Button(this.passwordVisible.has(fieldKey) ? '隐藏' : '显示')
@@ -1059,7 +1089,7 @@ struct MainPage {
           })
       }
       .width('100%')
-      .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+      .padding({ left: 8, right: 8, top: 2, bottom: 2 })
       .backgroundColor(this.hoverFieldKey === fieldKey ? '#f5f5f5' : '#fff')
       .alignItems(VerticalAlign.Center)
       .onHover((isHover: boolean) => {
@@ -1069,7 +1099,7 @@ struct MainPage {
       Divider()
         .strokeWidth(1)
         .color('#f0f0f0')
-        .margin({ top: 12, bottom: 12 })
+        .margin({ top: 4, bottom: 8 })
     }
     .width('100%')
     .alignItems(HorizontalAlign.Start)
@@ -1099,7 +1129,6 @@ struct MainPage {
             this.resetAutoCloseTimer()
             
             // TODO: 实现URL跳转功能
-            console.log('点击链接:', value)
           })
 
         Button('复制')
@@ -1114,12 +1143,11 @@ struct MainPage {
             this.resetAutoCloseTimer()
             
             // TODO: 实现复制功能
-            console.log('复制链接:', value)
           })
 
       }
       .width('100%')
-      .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+      .padding({ left: 8, right: 8, top: 2, bottom: 2 })
       .backgroundColor(this.hoverFieldKey === label ? '#f5f5f5' : '#fff')
       .alignItems(VerticalAlign.Center)
       .onHover((isHover: boolean) => {
@@ -1129,7 +1157,7 @@ struct MainPage {
       Divider()
         .strokeWidth(1)
         .color('#f0f0f0')
-        .margin({ top: 12, bottom: 12 })
+        .margin({ top: 8, bottom: 8 })
     }
     .width('100%')
     .alignItems(HorizontalAlign.Start)
@@ -1212,9 +1240,7 @@ struct MainPage {
       }
 
       const saveResult = await this.databaseFileManager.saveDatabaseToFile(database, 'default.kdbx');
-      if (saveResult.success) {
-        console.log('MainPage', '数据库保存成功');
-      } else {
+      if (!saveResult.success) {
         console.error('MainPage', '数据库保存失败:', saveResult.error);
       }
     } catch (error) {
