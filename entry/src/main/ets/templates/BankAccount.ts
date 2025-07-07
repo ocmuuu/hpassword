@@ -11,6 +11,10 @@ export const BankAccountTemplate: CategoryTemplate = {
     { key: 'Password', label: '网银密码', protected: true },
     { key: 'CVV', label: '信用卡 CVV', protected: true },
     { key: 'Expiry', label: '有效期' },
+    { key: 'AccountType', label: '账户类型' },
+    { key: 'IBAN', label: '国际银行账号' },
+    { key: 'SwiftCode', label: 'SWIFT代码' },
+    { key: 'BranchCode', label: '分行代码' },
     { key: 'Notes', label: '备注' }
   ],
   samples: [
@@ -22,6 +26,8 @@ export const BankAccountTemplate: CategoryTemplate = {
       Password: 'NetBank@123',
       CVV: '123',
       Expiry: '09/28',
+      AccountType: '信用卡',
+      BranchCode: '755',
       Notes: '短信验证'
     }
   ]

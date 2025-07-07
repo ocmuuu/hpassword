@@ -6,18 +6,22 @@ export const CertificateTemplate: CategoryTemplate = {
   fields: [
     { key: 'Title', label: '证件名称' },
     { key: 'Number', label: '证件号码' },
+    { key: 'Type', label: '证件类型' },
     { key: 'IssueDate', label: '签发日期' },
     { key: 'ExpiryDate', label: '有效期' },
     { key: 'Issuer', label: '签发机关' },
+    { key: 'Nationality', label: '国籍' },
     { key: 'Notes', label: '备注' }
   ],
   samples: [
     {
       Title: '中华人民共和国居民身份证',
       Number: '110101199001011234',
+      Type: '身份证',
       IssueDate: '2015-05-20',
       ExpiryDate: '2035-05-20',
-      Issuer: '北京市公安局'
+      Issuer: '北京市公安局',
+      Nationality: '中华人民共和国'
     }
   ]
 }; 

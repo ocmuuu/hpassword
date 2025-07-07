@@ -8,6 +8,8 @@ export const PaymentAccountTemplate: CategoryTemplate = {
     { key: 'UserName', label: '登录邮箱/手机号' },
     { key: 'Password', label: '登录密码', protected: true },
     { key: 'PayPassword', label: '支付密码', protected: true },
+    { key: 'RealName', label: '实名认证姓名' },
+    { key: 'Phone', label: '绑定手机号' },
     { key: 'Notes', label: '备注' }
   ],
   samples: [
@@ -16,6 +18,8 @@ export const PaymentAccountTemplate: CategoryTemplate = {
       UserName: '138****8888',
       Password: 'AliLogin2024',
       PayPassword: '******',
+      RealName: '张三',
+      Phone: '13800138888',
       Notes: '已绑定 U 盾'
     }
   ]

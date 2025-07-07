@@ -8,7 +8,10 @@ export const InsurancePolicyTemplate: CategoryTemplate = {
     { key: 'PolicyNumber', label: '保单号' },
     { key: 'Company', label: '保险公司' },
     { key: 'Coverage', label: '保障范围' },
+    { key: 'Premium', label: '保费' },
+    { key: 'Beneficiary', label: '受益人' },
     { key: 'Expiry', label: '到期日' },
+    { key: 'ClaimPhone', label: '理赔电话' },
     { key: 'Notes', label: '备注' }
   ],
   samples: [
@@ -17,7 +20,10 @@ export const InsurancePolicyTemplate: CategoryTemplate = {
       PolicyNumber: 'PAIC-2024-000888',
       Company: '中国平安',
       Coverage: '交强险 + 车损险',
-      Expiry: '2025-03-10'
+      Premium: '3580.00',
+      Beneficiary: '张三',
+      Expiry: '2025-03-10',
+      ClaimPhone: '95511'
     }
   ]
 }; 

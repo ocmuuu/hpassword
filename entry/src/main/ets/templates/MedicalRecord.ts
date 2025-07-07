@@ -8,14 +8,20 @@ export const MedicalRecordTemplate: CategoryTemplate = {
     { key: 'Hospital', label: '医院' },
     { key: 'Date', label: '日期' },
     { key: 'Doctor', label: '医生' },
-    { key: 'Notes', label: '诊断/备注' }
+    { key: 'PatientID', label: '患者ID' },
+    { key: 'Diagnosis', label: '诊断结果' },
+    { key: 'Treatment', label: '治疗方案' },
+    { key: 'Notes', label: '备注' }
   ],
   samples: [
     {
       Title: '年度体检报告',
       Hospital: '北京协和医院',
       Date: '2024-02-20',
-      Doctor: '王主任'
+      Doctor: '王主任',
+      PatientID: 'P20240220001',
+      Diagnosis: '健康状态良好',
+      Treatment: '建议定期复查'
     }
   ]
 }; 

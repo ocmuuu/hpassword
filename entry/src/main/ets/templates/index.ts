@@ -55,6 +55,7 @@ export const ALL_TEMPLATES: CategoryTemplate[] = [
 ];
 
 export * from './TemplateTypes';
+export * from './TemplateManager';
 export * from './Login';
 export * from './SecureNote';
 export * from './BankAccount';

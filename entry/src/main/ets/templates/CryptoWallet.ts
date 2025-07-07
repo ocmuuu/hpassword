@@ -8,6 +8,9 @@ export const CryptoWalletTemplate: CategoryTemplate = {
     { key: 'Address', label: '地址' },
     { key: 'Seed', label: '助记词', protected: true },
     { key: 'PrivateKey', label: '私钥', protected: true },
+    { key: 'Network', label: '网络/链' },
+    { key: 'Balance', label: '余额' },
+    { key: 'CreationDate', label: '创建日期' },
     { key: 'Notes', label: '备注' }
   ],
   samples: [
@@ -15,6 +18,9 @@ export const CryptoWalletTemplate: CategoryTemplate = {
       Title: 'MetaMask',
       Address: '0x1234...abcd',
       Seed: 'apple banana cat ...',
+      Network: 'Ethereum',
+      Balance: '1.5 ETH',
+      CreationDate: '2023-05-15',
       Notes: 'ETH 主网'
     }
   ]

@@ -8,13 +8,20 @@ export const SoftwareLicenseTemplate: CategoryTemplate = {
     { key: 'Version', label: '版本' },
     { key: 'LicenseKey', label: '密钥', protected: true },
     { key: 'RegisteredEmail', label: '授权邮箱' },
+    { key: 'PurchaseDate', label: '购买日期' },
+    { key: 'ExpiryDate', label: '过期日期' },
+    { key: 'MaxDevices', label: '最大设备数' },
     { key: 'Notes', label: '备注' }
   ],
   samples: [
     {
       Title: 'Windows 11 Pro',
       Version: '21H2',
-      LicenseKey: 'XXXXX-XXXXX-XXXXX-XXXXX-XXXXX'
+      LicenseKey: 'XXXXX-XXXXX-XXXXX-XXXXX-XXXXX',
+      RegisteredEmail: 'user@example.com',
+      PurchaseDate: '2023-10-01',
+      ExpiryDate: '永久',
+      MaxDevices: '1'
     }
   ]
 }; 

@@ -7,15 +7,7 @@ import { DatabaseFileManager } from '../utils/DatabaseFileManager'
 import { OperationResult, SearchCriteria } from '../utils/KdbxTypes'
 // 移除对 kdbxweb 的依赖，使用内置类型兼容
 import PreferencesUtil from '../utils/PreferencesUtil'
-import { 
-  LoginTemplate, SecureNoteTemplate, BankAccountTemplate, PaymentAccountTemplate,
-  SecuritiesFundTemplate, EmailAccountTemplate, MembershipCardTemplate, SubscriptionTemplate,
-  AddressBookTemplate, FamilyTemplate, CertificateTemplate, InsurancePolicyTemplate,
-  UtilityAccountTemplate, MedicalRecordTemplate, LoyaltyProgramTemplate, KeyCertificateTemplate,
-  ServerTemplate, DatabaseTemplate, IoTDeviceTemplate, VehicleInfoTemplate,
-  RouterTemplate, ApiCredentialTemplate, SoftwareLicenseTemplate, CryptoWalletTemplate,
-  OtherTemplate
-} from '../templates/index'
+import { TemplateManager, CategoryTemplate } from '../templates/index'
 
 // 侧边栏项目类型
 interface SidebarItem {
@@ -233,15 +225,7 @@ struct MainPage {
       const groupsResult = await this.kdbxQuery.getAllGroups()
       if (groupsResult.success && groupsResult.data) {
         // 获取所有系统模板分组名称
-        const systemTemplateNames = [
-          LoginTemplate.name, SecureNoteTemplate.name, BankAccountTemplate.name, PaymentAccountTemplate.name,
-          SecuritiesFundTemplate.name, EmailAccountTemplate.name, MembershipCardTemplate.name, SubscriptionTemplate.name,
-          AddressBookTemplate.name, FamilyTemplate.name, CertificateTemplate.name, InsurancePolicyTemplate.name,
-          UtilityAccountTemplate.name, MedicalRecordTemplate.name, LoyaltyProgramTemplate.name, KeyCertificateTemplate.name,
-          ServerTemplate.name, DatabaseTemplate.name, IoTDeviceTemplate.name, VehicleInfoTemplate.name,
-          RouterTemplate.name, ApiCredentialTemplate.name, SoftwareLicenseTemplate.name, CryptoWalletTemplate.name,
-          OtherTemplate.name
-        ]
+        const systemTemplateNames = TemplateManager.getSystemTemplateNames()
         
         // 先处理非回收站分组
         let recycleBinGroup: SidebarItem | null = null
@@ -314,7 +298,15 @@ struct MainPage {
       
       if (sidebarId === 'all_entries') {
         const allResult = await this.kdbxQuery.getAllEntries()
-        entries = allResult.success && allResult.data ? allResult.data : []
+        if (allResult.success && allResult.data) {
+          // 排除回收站的条目
+          entries = allResult.data.filter((entry: ESObject): boolean => {
+            const parentGroup: ESObject | null = entry.parentGroup as ESObject | null
+            return parentGroup !== null && (parentGroup.name as string) !== 'Recycle Bin'
+          })
+        } else {
+          entries = []
+        }
       } else if (sidebarId === 'starred') {
         const starredResult = await this.kdbxQuery.getStarredEntries()
         entries = starredResult.success && starredResult.data ? starredResult.data : []
@@ -440,19 +432,8 @@ struct MainPage {
   /**
    * 根据组名获取对应的模板
    */
-  private getTemplateByGroupName(groupName: string) {
-    // 导入所有模板
-    const templates = [
-      LoginTemplate, SecureNoteTemplate, BankAccountTemplate, PaymentAccountTemplate,
-      SecuritiesFundTemplate, EmailAccountTemplate, MembershipCardTemplate, SubscriptionTemplate,
-      AddressBookTemplate, FamilyTemplate, CertificateTemplate, InsurancePolicyTemplate,
-      UtilityAccountTemplate, MedicalRecordTemplate, LoyaltyProgramTemplate, KeyCertificateTemplate,
-      ServerTemplate, DatabaseTemplate, IoTDeviceTemplate, VehicleInfoTemplate,
-      RouterTemplate, ApiCredentialTemplate, SoftwareLicenseTemplate, CryptoWalletTemplate,
-      OtherTemplate
-    ];
-    
-    return templates.find(template => template.name === groupName);
+  private getTemplateByGroupName(groupName: string): CategoryTemplate | undefined {
+    return TemplateManager.getTemplateByGroupName(groupName);
   }
 
   /**
@@ -460,7 +441,7 @@ struct MainPage {
    */
   private getFieldInfo(fieldKey: string, groupName?: string): FieldInfo {
     // 特殊处理时间字段
-    if (fieldKey === '最后修改时间' || fieldKey === '创建时间') {
+    if (fieldKey === '修改时间' || fieldKey === '创建时间') {
       return { label: fieldKey, isProtected: false };
     }
     
@@ -468,7 +449,16 @@ struct MainPage {
     if (groupName) {
       const template = this.getTemplateByGroupName(groupName);
       if (template) {
-        const fieldSpec = template.fields.find(field => field.key === fieldKey);
+        // 先尝试精确匹配
+        let fieldSpec = template.fields.find(field => field.key === fieldKey);
+        
+        // 如果精确匹配失败，尝试大小写不敏感匹配
+        if (!fieldSpec) {
+          fieldSpec = template.fields.find(field => 
+            field.key.toLowerCase() === fieldKey.toLowerCase()
+          );
+        }
+        
         if (fieldSpec) {
           return { 
             label: fieldSpec.label, 
@@ -478,13 +468,116 @@ struct MainPage {
       }
     }
     
-    // 通用字段名称映射（用于用户自定义字段或未匹配的字段）
+    // 通用字段名称映射（用于无法匹配模板的字段，如回收站条目）
     const commonFieldNames: Record<string, string> = {
+      // 基础通用字段
       'Title': '标题',
-      'UserName': '用户名',
+      'UserName': '用户名', 
       'Password': '密码',
       'URL': '网址',
-      'Notes': '备注'
+      'Notes': '备注',
+      'Tags': '标签',
+      'Starred': '收藏',
+      
+      // 身份相关（通用含义）
+      'Name': '名称',
+      'ID': '标识符',
+      'Passport': '护照号',
+      'Email': '邮箱',
+      'Phone': '电话',
+      'Address': '地址',
+      'Company': '公司',
+      'JobTitle': '职位',
+      'Birthday': '生日',
+      'Relation': '关系',
+      'RealName': '实名',
+      'MedicalID': '医保卡号',
+      'Nationality': '国籍',
+      
+      // 金融相关（通用含义）
+      'AccountNumber': '账号',
+      'BankName': '银行',
+      'CardNumber': '卡号',
+      'CVV': '安全码',
+      'Expiry': '有效期',
+      'ExpiryDate': '有效期',
+      'PolicyNumber': '保单号',
+      'Coverage': '保障范围',
+      'Premium': '保费',
+      'Beneficiary': '受益人',
+      'AccountType': '账户类型',
+      'IBAN': '国际银行账号',
+      'SwiftCode': 'SWIFT代码',
+      'BranchCode': '分行代码',
+      'PayPassword': '支付密码',
+      'ClaimPhone': '理赔电话',
+      
+      // 证件相关
+      'Number': '证件号码',
+      'IssueDate': '签发日期',
+      'Issuer': '签发机关',
+      
+      // 医疗相关
+      'Hospital': '医院',
+      'Doctor': '医生',
+      'PatientID': '患者ID',
+      'Diagnosis': '诊断结果',
+      'Treatment': '治疗方案',
+      'Date': '日期',
+      
+      // 车辆相关
+      'Brand': '品牌',
+      'Model': '型号',
+      'VIN': 'VIN',
+      'Plate': '车牌号',
+      'Color': '颜色',
+      'PurchaseDate': '购买日期',
+      'Insurance': '保险到期',
+      'MaintenanceDate': '下次保养日期',
+      
+      // 技术相关
+      'Host': '主机',
+      'Port': '端口',
+      'Protocol': '协议',
+      'Server': '服务器',
+      'Database': '数据库',
+      'API_Key': 'API密钥',
+      'SecretKey': '密钥',
+      'PrivateKey': '私钥',
+      'Certificate': '证书',
+      'License': '许可证',
+      'Key': 'API Key',
+      'Secret': 'API Secret',
+      'BaseURL': '基础URL',
+      'Documentation': '文档链接',
+      'RateLimit': '速率限制',
+      
+      // 软件相关
+      'LicenseKey': '许可证密钥',
+      'RegisteredEmail': '授权邮箱',
+      'MaxDevices': '最大设备数',
+      
+      // 加密货币相关
+      'Seed': '助记词',
+      'Network': '网络/链',
+      'Balance': '余额',
+      'CreationDate': '创建日期',
+      
+      // 其他常见字段
+      'Website': '网站',
+      'Description': '描述',
+      'Comment': '注释',
+      'Category': '分类',
+      'Type': '类型',
+      'Status': '状态',
+      'Version': '版本',
+      'Location': '位置',
+      'Region': '所在地区',
+      'Level': '等级',
+      'Plan': '套餐',
+      'RenewDate': '续费日期',
+      'MemberID': '会员号',
+      'Points': '积分'
     };
     
     // 通过关键词判断是否为敏感字段
@@ -493,8 +586,21 @@ struct MainPage {
       fieldKey.toLowerCase().includes(keyword.toLowerCase())
     );
     
+    // 先尝试精确匹配
+    let fieldLabel = commonFieldNames[fieldKey];
+    
+    // 如果精确匹配失败，尝试大小写不敏感匹配
+    if (!fieldLabel) {
+      const matchedKey = Object.keys(commonFieldNames).find(key => 
+        key.toLowerCase() === fieldKey.toLowerCase()
+      );
+      if (matchedKey) {
+        fieldLabel = commonFieldNames[matchedKey];
+      }
+    }
+    
     return {
-      label: commonFieldNames[fieldKey] || fieldKey,
+      label: fieldLabel || fieldKey,
       isProtected
     };
   }
@@ -753,7 +859,7 @@ struct MainPage {
           .fillColor(item.type === 'special' ? '#007AFF' : '#666666')
 
         Text(item.title)
-          .fontSize(16)
+          .fontSize(17)
           .fontWeight(item.type === 'special' ? FontWeight.Medium : FontWeight.Normal)
           .fontColor('#000')
           .layoutWeight(1)
@@ -994,16 +1100,17 @@ struct MainPage {
     Column() {
       Row() {
         Text(label)
-          .fontSize(14)
+          .fontSize(16)
           .fontColor('#666')
           .fontWeight(FontWeight.Medium)
-          .width(80)
+          .width(120)
 
         Text(value)
-          .fontSize(14)
+          .fontSize(16)
           .fontColor('#000')
           .layoutWeight(1)
           .textAlign(TextAlign.Start)
+          .margin({ left: 8 })
 
         Button('复制')
           .fontSize(12)
@@ -1044,17 +1151,18 @@ struct MainPage {
     Column() {
       Row() {
         Text(label)
-          .fontSize(14)
+          .fontSize(16)
           .fontColor('#666')
           .fontWeight(FontWeight.Medium)
-          .width(80)
+          .width(120)
 
         Text(this.passwordVisible.has(fieldKey) ? value : '••••••••')
-          .fontSize(14)
+          .fontSize(16)
           .fontColor('#000')
           .layoutWeight(1)
           .textAlign(TextAlign.Start)
           .fontFamily('monospace')
+          .margin({ left: 8 })
 
         Button('复制')
           .fontSize(12)
@@ -1113,17 +1221,18 @@ struct MainPage {
     Column() {
       Row() {
         Text(label)
-          .fontSize(14)
+          .fontSize(16)
           .fontColor('#666')
           .fontWeight(FontWeight.Medium)
-          .width(80)
+          .width(120)
 
         Text(value)
-          .fontSize(14)
+          .fontSize(16)
           .fontColor('#007AFF')
           .layoutWeight(1)
           .textAlign(TextAlign.Start)
           .decoration({ type: TextDecorationType.Underline })
+          .margin({ left: 8 })
           .onClick(() => {
             // 重置自动关闭计时器
             this.resetAutoCloseTimer()

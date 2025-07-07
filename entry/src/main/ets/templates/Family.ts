@@ -9,6 +9,9 @@ export const FamilyTemplate: CategoryTemplate = {
     { key: 'ID', label: '身份证号' },
     { key: 'Passport', label: '护照号' },
     { key: 'MedicalID', label: '医保卡号' },
+    { key: 'Phone', label: '电话' },
+    { key: 'Birthday', label: '生日' },
+    { key: 'Address', label: '地址' },
     { key: 'Notes', label: '备注' }
   ],
   samples: [
@@ -17,7 +20,10 @@ export const FamilyTemplate: CategoryTemplate = {
       Relation: '父亲',
       ID: '110101196012121234',
       Passport: 'E12345678',
-      MedicalID: 'BJ-MED-0001'
+      MedicalID: 'BJ-MED-0001',
+      Phone: '13900001234',
+      Birthday: '1960-12-12',
+      Address: '北京市东城区示例街 10 号'
     }
   ]
 }; 
