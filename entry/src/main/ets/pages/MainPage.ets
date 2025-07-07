@@ -942,63 +942,68 @@ struct MainPage {
               .maxLines(1)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
 
-          // 加星/取消加星按钮
-          Button() {
-            Image(this.isEntryStarred(this.selectedEntry) ? $r('app.media.star') : $r('app.media.unstar'))
-              .width(20)
-              .height(20)
-              .fillColor(this.isEntryStarred(this.selectedEntry) ? '#FFD700' : '#666')
-          }
-          .backgroundColor('transparent')
-          .padding(4)
-          .margin({ right: 4 })
-          .stateEffect(false)
-          .onClick(async () => {
-            // 重置自动关闭计时器
-            this.resetAutoCloseTimer()
+          // 根据当前视图显示不同的按钮
+          if (!this.isInRecycleBin()) {
+            // 非回收站视图：显示加星、编辑、删除按钮
             
-            if (this.selectedEntry && this.kdbxEntryManager) {
-              const kdbxEntry: ESObject | null = await this.getKdbxEntryById(this.selectedEntry.id);
-              if (kdbxEntry) {
-                const result = this.kdbxEntryManager.toggleEntryStarred(kdbxEntry);
-                if (result.success) {
-                  // 保存数据库到文件
-                  await this.saveDatabaseToFile();
-                  
-                  // 更新侧边栏的加星数量
-                  await this.updateSidebarStarredCount();
-                  
-                  // 刷新列表
-                  await this.loadEntriesForSidebar(this.selectedSidebarId || 'all_entries');
-                  // 更新选中项
-                  const updatedSelectedEntry = this.entryItems.find(item => item.id === this.selectedEntry?.id);
-                  if (updatedSelectedEntry) {
-                    this.updateSelectedEntry(updatedSelectedEntry);
+            // 加星/取消加星按钮
+            Button() {
+              Image(this.isEntryStarred(this.selectedEntry) ? $r('app.media.star') : $r('app.media.unstar'))
+                .width(20)
+                .height(20)
+                .fillColor(this.isEntryStarred(this.selectedEntry) ? '#FFD700' : '#666')
+            }
+            .backgroundColor('transparent')
+            .padding(4)
+            .margin({ right: 4 })
+            .stateEffect(false)
+            .onClick(async () => {
+              // 重置自动关闭计时器
+              this.resetAutoCloseTimer()
+              
+              if (this.selectedEntry && this.kdbxEntryManager) {
+                const kdbxEntry: ESObject | null = await this.getKdbxEntryById(this.selectedEntry.id);
+                if (kdbxEntry) {
+                  const result = this.kdbxEntryManager.toggleEntryStarred(kdbxEntry);
+                  if (result.success) {
+                    // 保存数据库到文件
+                    await this.saveDatabaseToFile();
+                    
+                    // 更新侧边栏的加星数量
+                    await this.updateSidebarStarredCount();
+                    
+                    // 刷新列表
+                    await this.loadEntriesForSidebar(this.selectedSidebarId || 'all_entries');
+                    // 更新选中项
+                    const updatedSelectedEntry = this.entryItems.find(item => item.id === this.selectedEntry?.id);
+                    if (updatedSelectedEntry) {
+                      this.updateSelectedEntry(updatedSelectedEntry);
+                    }
                   }
                 }
               }
+            })
+
+            // 编辑按钮
+            Button() {
+              Image($r('app.media.edit'))
+                .width(20)
+                .height(20)
+                .fillColor('#007AFF')
             }
-          })
-
-          // 编辑按钮
-          Button() {
-            Image($r('app.media.edit'))
-              .width(20)
-              .height(20)
-              .fillColor('#007AFF')
+            .backgroundColor('transparent')
+            .padding(4)
+            .stateEffect(false)
+            .margin({ right: 4 })
+            .onClick(() => {
+              // 重置自动关闭计时器
+              this.resetAutoCloseTimer()
+              
+              // TODO: 实现编辑功能
+            })
           }
-          .backgroundColor('transparent')
-          .padding(4)
-          .stateEffect(false)
-          .margin({ right: 4 })
-          .onClick(() => {
-            // 重置自动关闭计时器
-            this.resetAutoCloseTimer()
-            
-            // TODO: 实现编辑功能
-          })
 
-          // 删除按钮
+          // 删除按钮（回收站和非回收站都有，但功能不同）
           Button() {
             Image($r('app.media.trash'))
               .width(20)
@@ -1012,7 +1017,6 @@ struct MainPage {
             // 重置自动关闭计时器
             this.resetAutoCloseTimer()
             
-            // 删除条目：移动至回收站
             if (!this.selectedEntry || !this.kdbxEntryManager) {
               return
             }
@@ -1023,21 +1027,27 @@ struct MainPage {
               return
             }
 
-            // 调用管理器删除（软删除会移动到回收站）
+            // 调用管理器删除（内部会根据是否在回收站自动选择软删除或硬删除）
+            console.log('MainPage', `正在删除条目: ${this.selectedEntry.title}, 回收站状态: ${this.isInRecycleBin()}`)
             const delResult = this.kdbxEntryManager.deleteEntry(kdbxEntry as ESObject)
+            
             if (delResult.success) {
+              console.log('MainPage', '删除操作成功，开始更新UI')
               // 保存数据库
               await this.saveDatabaseToFile()
 
               // 重新构建侧边栏数据（更新计数）
               await this.initializeSidebarItems()
 
-              // 刷新当前列表（若当前视图不是回收站，条目会消失）
+              // 刷新当前列表
               await this.loadEntriesForSidebar(this.selectedSidebarId || 'all_entries')
 
               // 清空详情选择
               this.selectedEntry = null
               this.selectedEntryId = null
+              console.log('MainPage', 'UI更新完成')
+            } else {
+              console.error('MainPage', '删除失败:', delResult.error)
             }
           })
         }
@@ -2006,5 +2016,13 @@ struct MainPage {
       return false
     }
     return text.toLowerCase().includes(this.searchQuery.toLowerCase())
+  }
+
+  /**
+   * 检查当前是否在回收站视图
+   */
+  private isInRecycleBin(): boolean {
+    const selectedItem = this.sidebarItems.find(item => item.id === this.selectedSidebarId)
+    return selectedItem?.type === 'recycle'
   }
 } 

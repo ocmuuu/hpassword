@@ -225,19 +225,24 @@ export class KdbxEntryManager {
         };
       }
 
-      if (parentGroup.uuid.id === this.database.meta.recycleBinUuid?.id) {
-        return { success: false, error: '禁止删除回收站', errorCode: 'CANNOT_DELETE_RECYCLE_BIN' };
-      }
+      // 这个检查是为了防止删除回收站组本身，但不应该阻止删除回收站中的条目
+      // 所以这个检查应该移除，因为我们要删除的是条目，不是组
 
       const inRecycle = this.isInRecycleBin(parentGroup);
 
+      hilog.info(0, TAG, '删除条目: %{public}s, 父组: %{public}s, 是否在回收站: %{public}s', 
+        entry.uuid.id, parentGroup.name || '未知', inRecycle ? '是' : '否');
+
       if (!inRecycle) {
         // 软删除：移动到回收站
+        hilog.info(0, TAG, '执行软删除，移动到回收站');
         this.database.remove(entry);
       } else {
         // 真正删除（仅限回收站内部）
+        hilog.info(0, TAG, '执行硬删除，直接删除条目');
         const entryIndex = parentGroup.entries.indexOf(entry);
         if (entryIndex === -1) {
+          hilog.error(0, TAG, '条目不在父组中，删除失败');
           return {
             success: false,
             error: '条目不在父组中',
@@ -245,6 +250,7 @@ export class KdbxEntryManager {
           };
         }
         parentGroup.entries.splice(entryIndex, 1);
+        hilog.info(0, TAG, '硬删除完成，已从父组中移除条目');
       }
 
       // 标记数据库已修改
