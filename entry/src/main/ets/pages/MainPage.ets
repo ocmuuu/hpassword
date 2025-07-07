@@ -257,7 +257,7 @@ struct MainPage {
             scrollableItems.push({
               id: group.uuid.id,
               title: groupName,
-              icon: $r('app.media.startIcon'),
+              icon: this.getTemplateIcon(groupName), // 根据模板分类获取图标
               type: 'group',
               count: entryCount
             })
@@ -352,16 +352,19 @@ struct MainPage {
            fields.set('Tags', tags.join(','));
          }
          
+         // 获取组名
+         const groupName = entry.parentGroup ? ((entry.parentGroup as ESObject).name as string) : '';
+         
          return ({
            id: (entry.uuid as ESObject).id as string,
            title: this.getFieldValue(entryFields, 'Title') || '无标题',
            username: this.getFieldValue(entryFields, 'UserName') || '',
            notes: this.getFieldValue(entryFields, 'Notes') || '',
            url: this.getFieldValue(entryFields, 'URL') || '',
-           icon: $r('app.media.startIcon'),
+           icon: this.getTemplateIcon(groupName), // 根据模板分类获取图标
            lastModified: this.formatDate(lastModTime),
            groupId: entry.parentGroup ? ((entry.parentGroup as ESObject).uuid as ESObject).id as string : '',
-           groupName: entry.parentGroup ? ((entry.parentGroup as ESObject).name as string) : '',
+           groupName: groupName,
            fields: fields
          }) as EntryItem;
        })
@@ -1313,6 +1316,99 @@ struct MainPage {
   }
 
   /**
+   * 根据模板分类名获取对应的图标
+   */
+  private getTemplateIcon(groupName: string): Resource {
+    if (!groupName) {
+      return $r('app.media.Templates_Default')
+    }
+    
+    // 使用TemplateManager获取模板信息
+    const template = TemplateManager.getTemplateByGroupName(groupName)
+    if (!template) {
+      // 用户自己创建的GROUP使用default.png
+      return $r('app.media.Templates_Default')
+    }
+    
+    // 获取英文名称映射
+    const englishNameMapping = TemplateManager.getEnglishNameMapping()
+    let englishName = ''
+    
+    // 查找对应的英文名称
+    const entries = Object.entries(englishNameMapping)
+    for (let i = 0; i < entries.length; i++) {
+      const entry = entries[i]
+      const key = entry[0]
+      const value = entry[1]
+      if (value === template.name) {
+        englishName = key
+        break
+      }
+    }
+    
+    // 如果找不到英文名称，使用模板名称
+    if (!englishName) {
+      englishName = template.name
+    }
+    
+    // 根据英文名称返回对应的图标资源
+    switch (englishName) {
+      case 'Login':
+        return $r('app.media.Templates_Login')
+      case 'SecureNote':
+        return $r('app.media.Templates_SecureNote')
+      case 'BankAccount':
+        return $r('app.media.Templates_BankAccount')
+      case 'PaymentAccount':
+        return $r('app.media.Templates_PaymentAccount')
+      case 'SecuritiesFund':
+        return $r('app.media.Templates_SecuritiesFund')
+      case 'EmailAccount':
+        return $r('app.media.Templates_EmailAccount')
+      case 'MembershipCard':
+        return $r('app.media.Templates_MembershipCard')
+      case 'Subscription':
+        return $r('app.media.Templates_Subscription')
+      case 'AddressBook':
+        return $r('app.media.Templates_AddressBook')
+      case 'Family':
+        return $r('app.media.Templates_Family')
+      case 'Certificate':
+        return $r('app.media.Templates_Certificate')
+      case 'InsurancePolicy':
+        return $r('app.media.Templates_InsurancePolicy')
+      case 'UtilityAccount':
+        return $r('app.media.Templates_UtilityAccount')
+      case 'MedicalRecord':
+        return $r('app.media.Templates_MedicalRecord')
+      case 'LoyaltyProgram':
+        return $r('app.media.Templates_LoyaltyProgram')
+      case 'KeyCertificate':
+        return $r('app.media.Templates_KeyCertificate')
+      case 'Server':
+        return $r('app.media.Templates_Server')
+      case 'Database':
+        return $r('app.media.Templates_Database')
+      case 'IoTDevice':
+        return $r('app.media.Templates_IoTDevice')
+      case 'VehicleInfo':
+        return $r('app.media.Templates_VehicleInfo')
+      case 'Router':
+        return $r('app.media.Templates_Router')
+      case 'ApiCredential':
+        return $r('app.media.Templates_ApiCredential')
+      case 'SoftwareLicense':
+        return $r('app.media.Templates_SoftwareLicense')
+      case 'CryptoWallet':
+        return $r('app.media.Templates_CryptoWallet')
+      case 'Other':
+        return $r('app.media.Templates_Other')
+      default:
+        return $r('app.media.Templates_Default')
+    }
+  }
+
+  /**
    * 通过ID获取KdbxEntry对象
    */
   private async getKdbxEntryById(entryId: string): Promise<ESObject | null> {
@@ -1862,16 +1958,19 @@ struct MainPage {
         fields.set('Tags', tags.join(','));
       }
       
+      // 获取组名
+      const groupName = group ? ((group as ESObject).name as string) : (entry.parentGroup ? ((entry.parentGroup as ESObject).name as string) : '');
+      
       return ({
         id: (entry.uuid as ESObject).id as string,
         title: this.getFieldValue(entryFields, 'Title') || '无标题',
         username: this.getFieldValue(entryFields, 'UserName') || '',
         notes: this.getFieldValue(entryFields, 'Notes') || '',
         url: this.getFieldValue(entryFields, 'URL') || '',
-        icon: $r('app.media.startIcon'),
+        icon: this.getTemplateIcon(groupName), // 根据模板分类获取图标
         lastModified: this.formatDate(lastModTime),
         groupId: group ? ((group as ESObject).uuid as ESObject).id as string : (entry.parentGroup ? ((entry.parentGroup as ESObject).uuid as ESObject).id as string : ''),
-        groupName: group ? ((group as ESObject).name as string) : (entry.parentGroup ? ((entry.parentGroup as ESObject).name as string) : ''),
+        groupName: groupName,
         fields: fields
       }) as EntryItem;
     } catch (error) {
