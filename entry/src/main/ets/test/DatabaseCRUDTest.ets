@@ -304,37 +304,28 @@ export class DatabaseCRUDTest {
       // 0. 初始化模板分类及示例数据
       this.initializeTemplatesData();
       await this.logDatabaseState('模板数据初始化后');
-      await this.saveDatabase();
       
       // 1. 测试分组CRUD
       await this.testGroupCRUD();
       await this.logDatabaseState('分组CRUD测试后');
-      await this.saveDatabase(); // 立即保存分组CRUD结果
       
       // 2. 测试条目CRUD
       await this.testEntryCRUD();
       await this.logDatabaseState('条目CRUD测试后');
-      await this.saveDatabase(); // 立即保存条目CRUD结果
       
       // 3. 测试复合操作
       await this.testComplexOperations();
       await this.logDatabaseState('复合操作测试后');
-      await this.saveDatabase(); // 立即保存复合操作结果
 
       // 3.5 清理非模板数据
       this.cleanupNonTemplateData();
       await this.logDatabaseState('清理非模板数据后');
-      await this.saveDatabase();
       
       // 4. 测试数据完整性
       await this.testDataIntegrity();
       await this.logDatabaseState('数据完整性测试后');
       
-      // 5. 最终保存数据库
-      await this.saveDatabase();
-      await this.logDatabaseState('最终数据库保存后');
-      
-      // 6. 测试数据持久化 - 关闭重新打开验证数据一致性
+      // 5. 测试数据持久化 - 关闭重新打开验证数据一致性
       await this.testDataPersistence();
       
       // 打印测试结果

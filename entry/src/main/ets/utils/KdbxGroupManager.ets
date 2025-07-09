@@ -16,6 +16,7 @@ import {
   logOperation,
   logError 
 } from './KdbxUtils';
+import DirtyFlag from './DirtyFlag';
 import { KdbxCoreManager } from '../utils/KdbxCore'
 
 const TAG = 'KdbxGroupManager';
@@ -854,6 +855,7 @@ export class KdbxGroupManager {
     if (this.database.meta) {
       this.database.meta.settingsChanged = new Date();
       this.database.meta.headerHash = undefined; // 触发完整序列化
+      DirtyFlag.dirty = true;
     }
   }
 

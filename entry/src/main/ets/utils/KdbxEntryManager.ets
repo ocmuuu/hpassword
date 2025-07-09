@@ -18,6 +18,7 @@ import {
   logError,
   getGroupPath
 } from './KdbxUtils';
+import DirtyFlag from './DirtyFlag';
 
 const TAG = 'KdbxEntryManager';
 
@@ -677,6 +678,7 @@ export class KdbxEntryManager {
     if (this.database.meta) {
       this.database.meta.settingsChanged = new Date();
       this.database.meta.headerHash = undefined; // 触发完整序列化
+      DirtyFlag.dirty = true;
     }
   }
 

@@ -5,6 +5,7 @@ import { DatabaseFileManager } from './DatabaseFileManager';
 import { OperationResult } from './KdbxTypes';
 import { logOperation, logError } from './KdbxUtils';
 import { DEFAULT_KDF_ROUNDS, getSecurityLevelName } from './KdbxConstants';
+import DirtyFlag from './DirtyFlag';
 
 const TAG = 'DefaultDatabase';
 const DEFAULT_DATABASE_NAME = 'default.kdbx';
@@ -87,6 +88,9 @@ export class DefaultDatabase {
           errorCode: createResult.errorCode || 'CREATE_FAILED'
         };
       }
+
+      // 标记数据库已修改，确保首次保存生效
+      DirtyFlag.dirty = true;
 
       // 保存数据库到文件
       const saveResult = await this.fileManager.saveDatabaseToFile(createResult.data, DEFAULT_DATABASE_NAME);

@@ -3,6 +3,7 @@ import { Context } from '@kit.AbilityKit';
 import { OperationResult, FileInfo } from './KdbxTypes';
 import { Kdbx } from '../lib';
 import { logOperation, logError } from './KdbxUtils';
+import DirtyFlag from './DirtyFlag';
 import fs from '@ohos.file.fs';
 
 const TAG = 'DatabaseFileManager';
@@ -64,6 +65,16 @@ export class DatabaseFileManager {
    * 保存数据库到文件
    */
   async saveDatabaseToFile(database: Kdbx, fileName: string): Promise<OperationResult<string>> {
+    console.info('[SAVE] stack:\n' + new Error().stack?.split('\n').slice(1,6).join('\n'));
+
+    // 若数据库未标记为脏，则跳过保存
+    if (!DirtyFlag.dirty) {
+      return {
+        success: true,
+        data: ''
+      } as OperationResult<string>;
+    }
+    
     try {
       logOperation('saveDatabaseToFile');
 
@@ -87,6 +98,9 @@ export class DatabaseFileManager {
 
       hilog.info(0, TAG, '数据库文件保存成功: %{public}s, 大小: %{public}d 字节', 
         filePath, arrayBuffer.byteLength);
+
+      // 保存成功后清除脏标记
+      DirtyFlag.dirty = false;
 
       return {
         success: true,
