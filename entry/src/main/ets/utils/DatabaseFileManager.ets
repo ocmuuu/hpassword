@@ -65,8 +65,6 @@ export class DatabaseFileManager {
    * 保存数据库到文件
    */
   async saveDatabaseToFile(database: Kdbx, fileName: string): Promise<OperationResult<string>> {
-    console.info('[SAVE] stack:\n' + new Error().stack?.split('\n').slice(1,6).join('\n'));
-
     // 若数据库未标记为脏，则跳过保存
     if (!DirtyFlag.dirty) {
       return {

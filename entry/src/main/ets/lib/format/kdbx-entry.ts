@@ -128,7 +128,9 @@ export class KdbxEntry {
             if (value !== undefined && value !== null) {
                 const node = XmlUtils.addChildNode(parentNode, XmlNames.Elem.String);
                 XmlUtils.setText(XmlUtils.addChildNode(node, XmlNames.Elem.Key), field);
-                XmlUtils.setProtectedText(XmlUtils.addChildNode(node, XmlNames.Elem.Value), value);
+
+                const valueToSet = value instanceof ProtectedValue ? value.getText() : value;
+                XmlUtils.setProtectedText(XmlUtils.addChildNode(node, XmlNames.Elem.Value), valueToSet);
             }
         }
     }
@@ -419,7 +421,7 @@ export class KdbxEntry {
         remoteHistory.sort((x, y) => x.lastModTime - y.lastModTime);
         let historyIx = 0,
             remoteHistoryIx = 0;
-        const newHistory = [];
+        const newHistory: KdbxEntry[] = [];
         while (historyIx < this.history.length || remoteHistoryIx < remoteHistory.length) {
             const historyEntry = this.history[historyIx],
                 remoteHistoryEntry = remoteHistory[remoteHistoryIx],

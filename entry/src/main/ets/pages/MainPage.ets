@@ -1569,19 +1569,25 @@ struct MainPage {
         username: this.formData['UserName'],
         password: this.formData['Password'],
         url: this.formData['URL'] || '',
-        notes: this.formData['Notes'] || ''
+        notes: this.formData['Notes'] || '',
+        template: this.selectedTemplate
       }
       // 设置 parentGroup
       if (targetGroup) {
         createParams.parentGroup = targetGroup
       }
 
-      // 添加自定义字段（如果有）
-      if (this.formData['TOTP']) {
-        if (!createParams.customFields) {
-          createParams.customFields = new Map<string, string>()
+      // 添加自定义字段
+      const customFields = new Map<string, string>()
+      this.selectedTemplate.fields.forEach((f: FieldSpec) => {
+        if (!['Title', 'UserName', 'Password', 'URL', 'Notes'].includes(f.key)) {
+          if (this.formData[f.key]) {
+            customFields.set(f.key, this.formData[f.key])
+          }
         }
-        createParams.customFields.set('TOTP', this.formData['TOTP'])
+      })
+      if (customFields.size > 0) {
+        createParams.customFields = customFields
       }
 
       // 创建新条目
@@ -1669,7 +1675,9 @@ struct MainPage {
         return
       }
 
-      const updateParams: EntryUpdateParams = {}
+      const updateParams: EntryUpdateParams = {
+        template: this.selectedTemplate
+      }
 
       if (this.formData['Title'] !== undefined) updateParams.title = this.formData['Title']
       if (this.formData['UserName'] !== undefined) updateParams.username = this.formData['UserName']

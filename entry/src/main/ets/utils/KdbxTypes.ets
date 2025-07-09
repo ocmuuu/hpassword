@@ -1,4 +1,5 @@
 import { KdbxEntry, KdbxGroup, KdbxUuid, ProtectedValue } from '../lib';
+import { CategoryTemplate } from '../templates/TemplateTypes';
 
 /**
  * 数据库统计信息
@@ -30,6 +31,7 @@ export interface EntryCreateParams {
   notes?: string;
   customFields?: Map<string, string | ProtectedValue>;
   parentGroup?: KdbxGroup;
+  template?: CategoryTemplate;
 }
 
 /**
@@ -42,6 +44,7 @@ export interface EntryUpdateParams {
   url?: string;
   notes?: string;
   customFields?: Map<string, string | ProtectedValue>;
+  template?: CategoryTemplate;
 }
 
 /**

@@ -609,15 +609,26 @@ export class KdbxEntryManager {
 
     // 设置自定义字段
     if (params.customFields) {
+      const protectedFieldKeys = new Set<string>();
+      if (params.template) {
+        params.template.fields.forEach(field => {
+          if (field.protected) {
+            protectedFieldKeys.add(field.key);
+          }
+        });
+      }
+
       const customEntries = Array.from(params.customFields.entries());
       for (let i = 0; i < customEntries.length; i++) {
         const key = customEntries[i][0];
         const value = customEntries[i][1];
-        
+
+        const isProtectedByTemplate = protectedFieldKeys.has(key);
+
         if (value instanceof ProtectedValue) {
           entry.fields.set(key, value);
         } else {
-          entry.fields.set(key, cleanText(value as string));
+          setEntryField(entry, key, value as string, isProtectedByTemplate);
         }
       }
     }
@@ -654,15 +665,26 @@ export class KdbxEntryManager {
 
     // 更新自定义字段
     if (params.customFields) {
+      const protectedFieldKeys = new Set<string>();
+      if (params.template) {
+        params.template.fields.forEach(field => {
+          if (field.protected) {
+            protectedFieldKeys.add(field.key);
+          }
+        });
+      }
+
       const customEntries = Array.from(params.customFields.entries());
       for (let i = 0; i < customEntries.length; i++) {
         const key = customEntries[i][0];
         const value = customEntries[i][1];
-        
+
+        const isProtectedByTemplate = protectedFieldKeys.has(key);
+
         if (value instanceof ProtectedValue) {
           entry.fields.set(key, value);
         } else {
-          entry.fields.set(key, cleanText(value as string));
+          setEntryField(entry, key, value as string, isProtectedByTemplate);
         }
       }
     }
