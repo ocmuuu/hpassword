@@ -25,6 +25,8 @@ struct Index {
   @State selectedKdfRounds: number = DEFAULT_KDF_ROUNDS;
   @State showAdvancedOptions: boolean = false;
   @State private passwordFocused: boolean = false
+  @State private openBtnError: boolean = false // 按钮错误状态
+  @State private openBtnErrorText: string = '' // 错误文本
   
   private defaultDatabase: DefaultDatabase | null = null;
 
@@ -176,14 +178,18 @@ struct Index {
       }
       
       // 等待3秒让用户看到测试结果
-      this.creationProgress = '即将跳转到主界面...';
-      await new Promise<void>((resolve) => setTimeout(resolve, 3000));
-      
-      // 跳转到主界面
-      await router.pushUrl({
-        url: 'pages/MainPage'
-      });
+      // 测试完成后回到登录页，让用户自行输入密码打开数据库
+      this.testResult = '✓ 密码库创建完成！请使用主密码登录';
+      this.creationProgress = '';
+      // 等待 2 秒以展示提示
+      await new Promise<void>((resolve) => setTimeout(resolve, 2000));
 
+      // 清理打开的实例，回到登录界面
+      KdbxCoreManager.getInstance().clearCurrentKdbxCore();
+      this.password = '';
+      this.confirmPassword = '';
+      this.databaseExists = true;
+      
     } catch (error) {
       hilog.error(0, TAG, '创建数据库异常: %{public}s', (error as Error).message);
       this.errorMessage = '创建数据库时发生错误: ' + (error as Error).message;
@@ -218,7 +224,18 @@ struct Index {
       const result = await this.defaultDatabase!.open(this.password);
 
       if (!result.success) {
-        this.errorMessage = result.error || '打开数据库失败';
+        const rawErr = result.error || '';
+        if (rawErr.includes('Invalid') || rawErr.toLowerCase().includes('wrong key')) {
+          // 在按钮上显示 "密码错误" 2 秒
+          this.openBtnError = true;
+          this.openBtnErrorText = '密码错误';
+          setTimeout(() => {
+            this.openBtnError = false;
+            this.openBtnErrorText = '';
+          }, 2000);
+        } else {
+          this.errorMessage = '打开数据库失败：' + rawErr;
+        }
         return;
       }
 
@@ -254,8 +271,8 @@ struct Index {
       return false;
     }
 
-    if (this.password.length < 6) {
-      this.errorMessage = '密码长度至少需要6个字符';
+    if (this.password.length < 8) {
+      this.errorMessage = '密码长度至少需要8个字符';
       return false;
     }
 
@@ -312,14 +329,14 @@ struct Index {
             this.buildCreateForm()
           }
 
-          // 错误信息
-          if (this.errorMessage) {
-            Text(this.errorMessage)
-              .fontSize(14)
-              .fontColor('#F44336')
-              .margin({ top: 20 })
-              .textAlign(TextAlign.Center)
-          }
+          // 错误信息占位（24px 高度）
+          Text(this.errorMessage)
+            .fontSize(18)
+            .fontColor('#F44336')
+            .margin({ top: 20 })
+            .textAlign(TextAlign.Center)
+            .opacity(this.errorMessage ? 1 : 0)
+            .height(24)
         }
         .width('100%')
         .height('100%')
@@ -368,44 +385,48 @@ struct Index {
         .margin({ bottom: 30 })
       
       // 打开按钮
-      Button('打开密码库')
+      Button(this.openBtnError ? this.openBtnErrorText : '打开密码库')
         .width('100%')
         .height(50)
         .fontSize(16)
         .fontWeight(FontWeight.Medium)
-        .backgroundColor('#1976D2')
+        .backgroundColor(this.openBtnError ? '#F44336' : '#1976D2')
         .borderRadius(8)
         .enabled(!this.isOpening)
         .onClick(() => {
           this.openDefaultDatabase();
         })
       
-      if (this.isOpening) {
-        Column() {
-          Row() {
-            LoadingProgress()
-              .width(20)
-              .height(20)
-              .margin({ right: 10 })
-            
-            Text('正在打开密码库...')
-              .fontSize(14)
-              .fontColor('#666666')
-          }
-          .margin({ top: 20 })
+      // 打开进度占位（总高度 60px）
+      Column() {
+        Row() {
+          LoadingProgress()
+            .width(20)
+            .height(20)
+            .margin({ right: 10 })
+            .opacity(this.isOpening ? 1 : 0)
           
-          // 显示打开进度
-          if (this.openingProgress) {
-            Text(this.openingProgress)
-              .fontSize(12)
-              .fontColor('#999999')
-              .margin({ top: 5 })
-              .textAlign(TextAlign.Center)
-          }
+          Text('正在打开密码库...')
+            .fontSize(14)
+            .fontColor('#666666')
+            .opacity(this.isOpening ? 1 : 0)
         }
-        .width('100%')
-        .alignItems(HorizontalAlign.Center)
+        .margin({ top: 20 })
+        .height(22)
+        .alignItems(VerticalAlign.Center)
+        
+        // 打开进度文本
+        Text(this.openingProgress)
+          .fontSize(16)
+          .fontColor('#999999')
+          .margin({ top: 5 })
+          .textAlign(TextAlign.Center)
+          .opacity(this.isOpening ? 1 : 0)
+          .height(18)
       }
+      .width('100%')
+      .alignItems(HorizontalAlign.Center)
+      .height(50)
     }
     .width('100%')
     .alignItems(HorizontalAlign.Center)
@@ -429,7 +450,7 @@ struct Index {
         .margin({ bottom: 30 })
       
       // 密码输入框
-      TextInput({ placeholder: '请输入主密码（至少6位）' })
+      TextInput({ placeholder: '请输入主密码（至少8位）' })
         .type(InputType.Password)
         .width('100%')
         .height(50)
@@ -460,94 +481,7 @@ struct Index {
           this.createDefaultDatabase();
         })
         .margin({ bottom: 30 })
-      
-      // 高级选项按钮
-      Button(this.showAdvancedOptions ? '隐藏高级选项' : '显示高级选项')
-        .width('100%')
-        .height(40)
-        .fontSize(14)
-        .fontWeight(FontWeight.Normal)
-        .backgroundColor('#FFFFFF')
-        .fontColor('#666666')
-        .borderRadius(8)
-        .borderWidth(1)
-        .borderColor('#DDDDDD')
-        .enabled(!this.isCreating)
-        .onClick(() => {
-          this.showAdvancedOptions = !this.showAdvancedOptions;
-        })
-        .margin({ bottom: 20 })
-      
-      // 高级选项面板
-      if (this.showAdvancedOptions) {
-        Column() {
-          Text('安全级别')
-            .fontSize(14)
-            .fontWeight(FontWeight.Medium)
-            .alignSelf(ItemAlign.Start)
-            .margin({ bottom: 10 })
-          
-          // 安全级别选择
-          Column() {
-            ForEach(KDF_ROUNDS_PRESETS, (preset: KdfRoundsPreset) => {
-              Row() {
-                Radio({ value: preset.rounds.toString(), group: 'securityLevel' })
-                  .checked(this.selectedKdfRounds === preset.rounds)
-                  .onChange((isChecked: boolean) => {
-                    if (isChecked) {
-                      this.selectedKdfRounds = preset.rounds;
-                    }
-                  })
-                  .margin({ right: 10 })
-                
-                Column() {
-                  Row() {
-                    Text(preset.name)
-                      .fontSize(14)
-                      .fontWeight(FontWeight.Medium)
-                    
-                    Text(`(${preset.rounds}轮)`)
-                      .fontSize(12)
-                      .fontColor('#666666')
-                      .margin({ left: 5 })
-                  }
-                  .width('100%')
-                  .justifyContent(FlexAlign.SpaceBetween)
-                  
-                  Text(preset.description)
-                    .fontSize(12)
-                    .fontColor('#999999')
-                    .alignSelf(ItemAlign.Start)
-                    .margin({ top: 2 })
-                  
-                  Text(`预计耗时: ${preset.estimatedTime}`)
-                    .fontSize(10)
-                    .fontColor('#999999')
-                    .alignSelf(ItemAlign.Start)
-                    .margin({ top: 2 })
-                }
-                .layoutWeight(1)
-                .alignItems(HorizontalAlign.Start)
-              }
-              .width('100%')
-              .padding(10)
-              .backgroundColor(this.selectedKdfRounds === preset.rounds ? '#E3F2FD' : '#FFFFFF')
-              .borderRadius(8)
-              .margin({ bottom: 8 })
-              .onClick(() => {
-                this.selectedKdfRounds = preset.rounds;
-              })
-            })
-          }
-          .width('100%')
-          .margin({ bottom: 20 })
-        }
-        .width('100%')
-        .padding(15)
-        .backgroundColor('#F8F9FA')
-        .borderRadius(8)
-        .margin({ bottom: 20 })
-      }
+        
       
       // 创建按钮
       Button('创建密码库')
@@ -562,42 +496,46 @@ struct Index {
           this.createDefaultDatabase();
         })
       
-      if (this.isCreating) {
-        Column() {
-          Row() {
-            LoadingProgress()
-              .width(20)
-              .height(20)
-              .margin({ right: 10 })
-            
-            Text('正在创建密码库...')
-              .fontSize(14)
-              .fontColor('#666666')
-          }
-          .margin({ top: 20 })
+      // 创建进度与测试结果占位（总高度约60px）
+      Column() {
+        Row() {
+          LoadingProgress()
+            .width(20)
+            .height(20)
+            .margin({ right: 10 })
+            .opacity(this.isCreating ? 1 : 0)
           
-          // 显示创建进度
-          if (this.creationProgress) {
-            Text(this.creationProgress)
-              .fontSize(12)
-              .fontColor('#999999')
-              .margin({ top: 5 })
-              .textAlign(TextAlign.Center)
-          }
-          
-          // 显示测试结果
-          if (this.testResult) {
-            Text(this.testResult)
-              .fontSize(14)
-              .fontColor(this.testResult.includes('✓') ? '#4CAF50' : 
-                         this.testResult.includes('✗') ? '#F44336' : '#666666')
-              .margin({ top: 10 })
-              .textAlign(TextAlign.Center)
-          }
+          Text('正在创建密码库...')
+            .fontSize(14)
+            .fontColor('#666666')
+            .opacity(this.isCreating ? 1 : 0)
         }
-        .width('100%')
-        .alignItems(HorizontalAlign.Center)
+        .margin({ top: 20 })
+        .height(22)
+        .alignItems(VerticalAlign.Center)
+        
+        // 创建进度文本
+        Text(this.creationProgress)
+          .fontSize(14)
+          .fontColor('#999999')
+          .margin({ top: 5 })
+          .textAlign(TextAlign.Center)
+          .opacity(this.isCreating ? 1 : 0)
+          .height(18)
+
+        // 测试结果文本
+        Text(this.testResult)
+          .fontSize(16)
+          .fontColor(this.testResult.includes('✓') ? '#4CAF50' : 
+                     this.testResult.includes('✗') ? '#F44336' : '#666666')
+          .margin({ top: 10 })
+          .textAlign(TextAlign.Center)
+          .opacity(this.isCreating ? 1 : 0)
+          .height(20)
       }
+      .width('100%')
+      .alignItems(HorizontalAlign.Center)
+      .height(60)
     }
     .width('100%')
     .alignItems(HorizontalAlign.Center)

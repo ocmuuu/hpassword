@@ -13,7 +13,7 @@ export const SubscriptionTemplate: CategoryTemplate = {
   ],
   samples: [
     {
-      Title: 'Netflix',
+      Title: '阿里云盘',
       UserName: 'bob@example.com',
       Password: 'Netfl!x2024',
       RenewDate: '2024-08-01',

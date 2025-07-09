@@ -135,6 +135,7 @@ export class FieldInfoHelper {
       'API_Key': 'API密钥',
       'SecretKey': '密钥',
       'PrivateKey': '私钥',
+      'PublicKey': '公钥',
       'Certificate': '证书',
       'License': '许可证',
       'Key': 'API Key',
@@ -142,6 +143,7 @@ export class FieldInfoHelper {
       'BaseURL': '基础URL',
       'Documentation': '文档链接',
       'RateLimit': '速率限制',
+      'DBname':'数据库名',
       
       // 软件相关
       'LicenseKey': '许可证密钥',
@@ -168,7 +170,8 @@ export class FieldInfoHelper {
       'Plan': '套餐',
       'RenewDate': '续费日期',
       'MemberID': '会员号',
-      'Points': '积分'
+      'Points': '积分',
+      'Content': '内容'
     };
     
     // 通过关键词判断是否为敏感字段
@@ -242,6 +245,10 @@ export class FieldInfoHelper {
     // 生成 renderFields 供 UI 渲染
     const renderFields: RenderField[] = [];
     sortedFields.forEach(key => {
+      if (key === 'Starred') {
+        return; // 不展示收藏标记字段
+      }
+
       const value = fields.get(key);
       if (!value || value.trim().length === 0) {
         return;
@@ -263,6 +270,22 @@ export class FieldInfoHelper {
       });
     });
 
-    return renderFields;
+    // 确保创建/修改时间字段始终在最后
+    const timeOrder = ['创建时间', '修改时间'];
+    const timeFields: RenderField[] = [];
+    const otherFields: RenderField[] = [];
+
+    renderFields.forEach(f => {
+      if (timeOrder.includes(f.key)) {
+        timeFields.push(f);
+      } else {
+        otherFields.push(f);
+      }
+    });
+
+    // 按预设顺序排序时间字段
+    timeFields.sort((a, b) => timeOrder.indexOf(a.key) - timeOrder.indexOf(b.key));
+
+    return otherFields.concat(timeFields);
   }
 } 

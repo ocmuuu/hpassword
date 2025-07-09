@@ -2,15 +2,15 @@
   "string": [
     {
       "name": "module_desc",
-      "value": "module description"
+      "value": "hPassword - 安全密码管理器"
     },
     {
       "name": "EntryAbility_desc",
-      "value": "description"
+      "value": "hPassword 主要功能模块"
     },
     {
       "name": "EntryAbility_label",
-      "value": "label"
+      "value": "hPassword"
     }
   ]
 }

@@ -1,10 +1,11 @@
 {
-  "name": "entry",
-  "version": "1.0.0",
-  "description": "Please describe the basic information.",
-  "main": "",
-  "author": "",
   "license": "",
+  "devDependencies": {},
+  "author": "Mznm",
+  "name": "hPassword",
+  "description": "一款专业的 HarmonyOS 密码管理软件，为用户提供安全、便捷的密码管理解决方案。",
+  "main": "",
+  "version": "1.0.0",
   "dependencies": {}
 }
 
