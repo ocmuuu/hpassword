@@ -806,7 +806,7 @@ struct MainPage {
       .width('100%')
       .height('100%')
     } else {
-      // 顶部栏：仅显示帮助按钮
+      // 顶部栏：显示数据库管理和帮助按钮
       Row() {
         Blank()
           .layoutWeight(1)
@@ -1052,6 +1052,8 @@ struct MainPage {
           .padding({ left: 12, right: 12, top: 4, bottom: 4 })
           .borderRadius(2)
           .height(32)
+          .border({ width: 1, color: '#000' })
+          .margin({ right: 5 })
           .onClick(() => {
             if (this.isEditingEntry) {
               this.hideEditForm()
@@ -1068,6 +1070,7 @@ struct MainPage {
           .padding({ left: 12, right: 12, top: 4, bottom: 4 })
           .borderRadius(2)
           .height(32)
+          .border({ width: 1, color: '#000' })
           .enabled(!this.isSubmitting)
           .onClick(() => {
             if (this.isEditingEntry) {
@@ -1784,6 +1787,15 @@ struct MainPage {
                 .height(16)
                 .fillColor('#666')
                 .margin({ right: 8 })
+                .onClick(() => {
+                  router.pushUrl({
+                    url: 'pages/KdbxPage'
+                  }, router.RouterMode.Standard, (err) => {
+                    if (err) {
+                      console.error('MainPage', '跳转到KdbxPage失败:', err)
+                    }
+                  })
+                })
               
               Text(this.databaseName)
                 .fontSize(18)
@@ -1792,6 +1804,11 @@ struct MainPage {
                 .layoutWeight(1)
                 .maxLines(1)
                 .textOverflow({ overflow: TextOverflow.Ellipsis })
+                .onClick(() => {
+                  router.pushUrl({
+                    url: 'pages/KdbxPage'
+                  })
+                })
 
               Image($r('app.media.lock'))
                 .width(20)
@@ -1932,13 +1949,13 @@ struct MainPage {
               Image($r('app.media.new'))
                 .width(20)
                 .height(20)
-                .fillColor(this.isInRecycleBin() ? '#999' : '#007AFF')
+                .fillColor(this.isInRecycleBin() || this.isAddingEntry || this.isEditingEntry ? '#999' : '#007AFF')
             }
             .backgroundColor('transparent')
             .padding(4)
             .stateEffect(false)
             .margin({ left: 8 })
-            .enabled(!this.isInRecycleBin())
+            .enabled(!this.isInRecycleBin() && !this.isAddingEntry && !this.isEditingEntry)
             .onClick(() => {
               // 重置自动关闭计时器
               this.resetAutoCloseTimer()

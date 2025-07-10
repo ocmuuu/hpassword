@@ -52,6 +52,16 @@ export default class PreferencesUtil {
   }
   // endregion
 
+  // region New getters for Kdbx database list & current db
+  static getKdbxDatabaseListSync(): string {
+    return PreferencesUtil.dataPreferences?.getSync('kdbx_database_list', '[]') as string ?? '[]';
+  }
+
+  static getKdbxCurrentDatabaseIdSync(): string {
+    return PreferencesUtil.dataPreferences?.getSync('kdbx_current_database_id', '') as string ?? '';
+  }
+  // endregion
+
   // region Setter
   static saveSelectedKdbxSidebarIdSync(id: string): void {
     if (PreferencesUtil.dataPreferences) {
@@ -77,6 +87,22 @@ export default class PreferencesUtil {
   static saveKdbxSecondColumnWidthSync(width: number): void {
     if (PreferencesUtil.dataPreferences) {
       PreferencesUtil.dataPreferences.putSync('kdbx_second_column_width', width);
+      PreferencesUtil.dataPreferences.flush();
+    }
+  }
+  // endregion
+
+  // region New setters for Kdbx database list & current db
+  static saveKdbxDatabaseListSync(listJson: string): void {
+    if (PreferencesUtil.dataPreferences) {
+      PreferencesUtil.dataPreferences.putSync('kdbx_database_list', listJson);
+      PreferencesUtil.dataPreferences.flush();
+    }
+  }
+
+  static saveKdbxCurrentDatabaseIdSync(id: string): void {
+    if (PreferencesUtil.dataPreferences) {
+      PreferencesUtil.dataPreferences.putSync('kdbx_current_database_id', id);
       PreferencesUtil.dataPreferences.flush();
     }
   }

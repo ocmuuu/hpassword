@@ -6,6 +6,16 @@ import { KdbxCoreManager } from '../utils/KdbxCore';
 import { runDatabaseCRUDTest } from '../test/DatabaseCRUDTest';
 import { KDF_ROUNDS_PRESETS, DEFAULT_KDF_ROUNDS, getSecurityLevelName, KdfRoundsPreset } from '../utils/KdbxConstants';
 import fs from '@ohos.file.fs';
+import PreferencesUtil from '../utils/PreferencesUtil'
+
+// 数据库列表项类型（与 KdbxPage 保持一致）
+interface DatabaseItem {
+  id: string
+  name: string
+  path: string
+  lastModified: string
+  size: number
+}
 
 const TAG = 'IndexPage';
 
@@ -28,10 +38,21 @@ struct Index {
   @State private openBtnError: boolean = false // 按钮错误状态
   @State private openBtnErrorText: string = '' // 错误文本
   @State private capsLockOn: boolean = false // 大写锁定状态
+  @State currentDatabaseName: string = '默认密码库';
   
   private defaultDatabase: DefaultDatabase | null = null;
 
   aboutToAppear() {
+    // 初始化首选项，后续保存数据库列表需要
+    try {
+      const context = getContext() as common.UIAbilityContext;
+      if (!PreferencesUtil.isInitialized()) {
+        PreferencesUtil.initSync(context);
+      }
+    } catch (e) {
+      console.error('IndexPage', '初始化Preferences失败', e);
+    }
+
     this.checkDatabaseExists();
     // 页面加载后自动获取焦点
     setTimeout(() => {
@@ -78,6 +99,21 @@ struct Index {
       this.databaseExists = false;
     } finally {
       this.isLoading = false;
+
+      // 加载首选项中的当前数据库名称
+      const currId: string = PreferencesUtil.getKdbxCurrentDatabaseIdSync();
+      let name = '默认密码库';
+      try {
+        const listJson: string = PreferencesUtil.getKdbxDatabaseListSync();
+        const list: DatabaseItem[] = JSON.parse(listJson) as DatabaseItem[];
+        if (currId && Array.isArray(list)) {
+          const found: DatabaseItem | undefined = list.find((it: DatabaseItem)=> it.id === currId);
+          if (found && found.name) {
+            name = found.name;
+          }
+        }
+      } catch(e) {}
+      this.currentDatabaseName = name;
     }
   }
 
@@ -191,6 +227,18 @@ struct Index {
       this.confirmPassword = '';
       this.capsLockOn = false; // 清除大写锁定状态
       this.databaseExists = true;
+      
+      // 保存数据库列表和当前ID
+      try {
+        const context = getContext() as common.UIAbilityContext;
+        const dbFileName = 'default.kdbx';
+        const dbPath = `${context.filesDir}/${dbFileName}`;
+        let size = 0;
+        try { const stat = await fs.stat(dbPath); size = stat.size; } catch(e){}
+        const dbItem: DatabaseItem = { id: 'default', name: '默认密码库', path: dbPath, lastModified: new Date().toISOString().split('T')[0], size } as DatabaseItem;
+        PreferencesUtil.saveKdbxDatabaseListSync(JSON.stringify([dbItem] as DatabaseItem[]));
+        PreferencesUtil.saveKdbxCurrentDatabaseIdSync('default');
+      } catch(e) { console.error('Index', '保存数据库列表失败', e); }
       
     } catch (error) {
       hilog.error(0, TAG, '创建数据库异常: %{public}s', (error as Error).message);
@@ -387,7 +435,7 @@ struct Index {
   @Builder
   buildLoginForm() {
     Column() {
-      Text('输入主密码')
+      Text(`输入 ${this.currentDatabaseName} 主密码`)
         .fontSize(18)
         .fontWeight(FontWeight.Medium)
         .margin({ bottom: 30 })
@@ -505,18 +553,6 @@ struct Index {
         })
         .margin({ bottom: 10 })
       
-      // 大写锁定提示
-      Row() {
-        Text('⚠️ 大写锁定已开启')
-          .fontSize(14)
-          .fontColor('#FF9800')
-          .opacity(this.capsLockOn ? 1 : 0)
-      }
-      .width('100%')
-      .height(20)
-      .justifyContent(FlexAlign.Start)
-      .margin({ bottom: 10 })
-      
       // 确认密码输入框
       TextInput({ placeholder: '请再次输入主密码' })
         .type(InputType.Password)
@@ -534,8 +570,19 @@ struct Index {
         .onSubmit(() => {
           this.createDefaultDatabase();
         })
-        .margin({ bottom: 30 })
-        
+        .margin({ bottom: 10 })
+
+      // 大写锁定提示
+      Row() {
+        Text('⚠️ 大写锁定已开启')
+          .fontSize(14)
+          .fontColor('#FF9800')
+          .opacity(this.capsLockOn ? 1 : 0)
+      }
+      .width('100%')
+      .height(20)
+      .justifyContent(FlexAlign.Start)
+      .margin({ bottom: 10 })
       
       // 创建按钮
       Button('创建密码库')
@@ -549,7 +596,6 @@ struct Index {
         .onClick(() => {
           this.createDefaultDatabase();
         })
-        .margin({ top: 10 })
       
       // 创建进度与测试结果占位（总高度约60px）
       Column() {
