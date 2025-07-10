@@ -5,7 +5,7 @@ import { KdbxQuery } from '../utils/KdbxQuery'
 import { KdbxEntryManager } from '../utils/KdbxEntryManager'
 import { KdbxGroupManager } from '../utils/KdbxGroupManager'
 import { DatabaseFileManager } from '../utils/DatabaseFileManager'
-import { OperationResult, EntryCreateParams, EntryUpdateParams } from '../utils/KdbxTypes'
+import { OperationResult, EntryCreateParams, EntryUpdateParams, GroupCreateParams } from '../utils/KdbxTypes'
 import PreferencesUtil from '../utils/PreferencesUtil'
 import { TemplateManager, CategoryTemplate } from '../templates/index'
 import { EntryConverter, EntryItem } from '../utils/EntryConverter'
@@ -13,6 +13,15 @@ import { FieldInfoHelper, FieldInfo, RenderField } from '../templates/FieldInfoH
 import { SearchHelper, SearchState } from '../utils/SearchHelper'
 import { LoginTemplate } from '../templates/Login'
 import { FieldSpec } from '../templates/TemplateTypes'
+
+// 密码库项目类型（配置项中的原始数据）
+interface DatabaseItem {
+  id: string
+  name: string
+  path: string
+  lastModified: string
+  size: number
+}
 
 // 侧边栏项目类型
 interface SidebarItem {
@@ -1350,9 +1359,46 @@ struct MainPage {
         return;
       }
 
-      const saveResult = await this.databaseFileManager.saveDatabaseToFile(database, 'default.kdbx');
+      // 获取当前打开的密码库ID
+      const currentId: string = PreferencesUtil.getKdbxCurrentDatabaseIdSync();
+      let targetFileName: string = '';
+      
+      if (currentId === 'default' || !currentId) {
+        // 默认密码库，保存到 default.kdbx
+        targetFileName = 'default.kdbx';
+        console.log('MainPage', '保存到默认密码库文件:', targetFileName);
+      } else {
+        // 非默认密码库，需要从数据库列表中获取文件路径
+        try {
+          const listJson: string = PreferencesUtil.getKdbxDatabaseListSync();
+          const list: DatabaseItem[] = JSON.parse(listJson) as DatabaseItem[];
+          const currentDb = list.find((it: DatabaseItem) => it.id === currentId);
+          
+          if (currentDb && currentDb.path) {
+            targetFileName = currentDb.path;
+            console.log('MainPage', '保存到当前密码库文件:', currentDb.name, '路径:', targetFileName);
+          } else {
+            console.error('MainPage', '严重错误：未找到当前密码库信息，无法确定保存路径，拒绝保存以防止数据污染');
+            console.error('MainPage', '当前密码库ID:', currentId, '可用密码库列表:', list.map(db => `${db.name}(${db.id})`).join(', '));
+            return; // 直接返回，不进行保存
+          }
+        } catch (e) {
+          console.error('MainPage', '严重错误：解析数据库列表失败，无法确定保存路径，拒绝保存以防止数据污染:', e);
+          return; // 直接返回，不进行保存
+        }
+      }
+
+      // 确保targetFileName不为空
+      if (!targetFileName) {
+        console.error('MainPage', '严重错误：无法确定目标文件名，拒绝保存');
+        return;
+      }
+
+      const saveResult = await this.databaseFileManager.saveDatabaseToFile(database, targetFileName);
       if (!saveResult.success) {
         console.error('MainPage', '数据库保存失败:', saveResult.error);
+      } else {
+        console.log('MainPage', '数据库保存成功到:', targetFileName);
       }
     } catch (error) {
       console.error('MainPage', '保存数据库时发生错误:', error);
@@ -1567,6 +1613,26 @@ struct MainPage {
 
         if (groupId && allGroupsResult?.success && allGroupsResult.data) {
           targetGroup = allGroupsResult.data.find((g: ESObject) => (g.uuid as ESObject).id === groupId)
+        }
+      }
+
+      // 3. 如果仍未找到目标组，则创建以模板名称命名的新组
+      if (!targetGroup && this.kdbxGroupManager) {
+        // 获取默认的父组（根组）
+        const defaultGroup = this.kdbxCore?.getDatabase()?.getDefaultGroup()
+        
+        // 创建新组
+        const createGroupResult = this.kdbxGroupManager.createGroup({
+          name: this.selectedTemplate.name,
+          notes: `自动创建的${this.selectedTemplate.name}模板组`,
+          parentGroup: defaultGroup
+        })
+        
+        if (createGroupResult.success && createGroupResult.data) {
+          targetGroup = createGroupResult.data as ESObject
+          console.log('MainPage', `已创建新组: ${this.selectedTemplate.name}`)
+        } else {
+          console.warn('MainPage', `创建组失败: ${createGroupResult.error}`)
         }
       }
 

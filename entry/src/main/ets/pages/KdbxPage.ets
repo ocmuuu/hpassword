@@ -4,8 +4,11 @@ import { DatabaseFileManager } from '../utils/DatabaseFileManager'
 import PreferencesUtil from '../utils/PreferencesUtil'
 import pasteboard from '@ohos.pasteboard'
 import fs from '@ohos.file.fs'
+import DirtyFlag from '../utils/DirtyFlag'
+import { KdbxCore, KdbxCoreManager } from '../utils/KdbxCore'
+import { ProtectedValue } from '../lib'
 
-// 数据库项目类型
+// 密码库项目类型（配置项中的原始数据）
 interface DatabaseItem {
   id: string
   name: string
@@ -14,13 +17,27 @@ interface DatabaseItem {
   size: number
 }
 
+// 页面显示用的密码库项目类型（包含转换后的显示信息）
+interface DisplayDatabaseItem {
+  id: string
+  name: string
+  path: string
+  lastModified: string
+  size: number
+  // 转换后的显示字段
+  displayDir: string
+  displayFileName: string
+  displaySize: string
+}
+
 @Entry
 @Component
 struct KdbxPage {
   // 数据状态
-  @State private databaseItems: DatabaseItem[] = []
+  @State private databaseItems: DisplayDatabaseItem[] = []
   @State private selectedDatabaseId: string | null = null
-  @State private selectedDatabase: DatabaseItem | null = null
+  @State private selectedDatabase: DisplayDatabaseItem | null = null
+
   
   // 布局状态
   @State private isFirstColumnCollapsed: boolean = false
@@ -41,6 +58,21 @@ struct KdbxPage {
   @State private successToastMessage: string = '复制成功'
 
   private copySuccessTimer: number | null = null
+  private formErrorTimer: number | null = null
+
+  @State private isAddingDatabase: boolean = false // 是否正在添加新密码库
+  @State private newDbName: string = ''
+  @State private newDbPath: string = ''
+  @State private newPassword: string = ''
+  @State private confirmPassword: string = ''
+  @State private formError: string = ''
+  @State private showSwitchSuccessToast: boolean = false // 切换密码库成功提示
+  @State private switchSuccessMessage: string = '切换密码库成功'
+  
+  // 双击检测相关
+  private lastClickTime: number = 0
+  private lastClickedId: string = ''
+  private readonly DOUBLE_CLICK_INTERVAL: number = 300 // 双击间隔时间(毫秒)
 
   async aboutToAppear() {
     try {
@@ -102,7 +134,7 @@ struct KdbxPage {
     try {
       this.isLoading = true
       
-      // 加载数据库列表
+      // 加载密码库列表
       await this.loadDatabaseList()
       
     } catch (error) {
@@ -113,7 +145,7 @@ struct KdbxPage {
   }
 
   /**
-   * 加载数据库列表
+   * 加载密码库列表
    */
   private async loadDatabaseList() {
     try {
@@ -121,64 +153,214 @@ struct KdbxPage {
         return
       }
 
-      // 优先从首选项读取数据库列表
+      // 优先从首选项读取密码库列表
       const listJson: string = PreferencesUtil.getKdbxDatabaseListSync();
+      console.log(`KdbxPage - 配置项中的原始密码库列表: ${listJson}`);
       let storedList: DatabaseItem[] = [];
       try {
         storedList = JSON.parse(listJson) as DatabaseItem[];
+        console.log(`KdbxPage - 解析后的密码库列表:`, storedList.map(item => `${item.name}(ID:${item.id})`).join(', '));
       } catch (e) {
-        console.error('KdbxPage', '解析数据库列表失败:', e);
+        console.error('KdbxPage', '解析密码库列表失败:', e);
       }
 
-      let validList: DatabaseItem[] = [];
+      let validOriginalList: DatabaseItem[] = [];
       if (storedList && storedList.length > 0) {
-        const existenceArr: boolean[] = await Promise.all(storedList.map(async (it: DatabaseItem) => {
+        const existenceArr: boolean[] = await Promise.all(storedList.map(async (it: DatabaseItem, index: number) => {
           try {
-            if (it.path.includes('/')) {
+            console.log(`KdbxPage - 检查密码库文件 ${index}: ${it.name}, 路径: ${it.path}`);
+            let exists = false;
+            
+            // 首先检查路径是否为空或无效
+            if (!it.path || it.path.trim() === '') {
+              console.log(`KdbxPage - 路径为空，标记为不存在`);
+              exists = false;
+            } else if (it.path.includes('/')) {
+              // 绝对路径，直接检查
               await fs.access(it.path);
               const stat = await fs.stat(it.path);
-              return stat.size > 0;
+              exists = stat.size > 0;
+              console.log(`KdbxPage - 绝对路径检查结果: ${exists}, 大小: ${stat.size}`);
             } else if (this.databaseFileManager) {
-              return await this.databaseFileManager.fileExists(it.path);
+              // 相对路径，通过 FileManager 检查
+              exists = await this.databaseFileManager.fileExists(it.path);
+              console.log(`KdbxPage - 相对路径检查结果: ${exists}`);
+            } else {
+              console.log(`KdbxPage - DatabaseFileManager 未初始化，跳过检查`);
+              exists = false;
             }
-          } catch(_) {
+            
+            return exists;
+          } catch(error) {
+            console.log(`KdbxPage - 检查文件存在性失败: ${error}`);
             return false;
           }
-          return false;
         }));
-        validList = storedList.filter((_, idx) => existenceArr[idx]);
+        
+        console.log(`KdbxPage - 存在性检查结果: ${existenceArr.join(', ')}`);
+        validOriginalList = storedList.filter((_, idx) => existenceArr[idx]);
+        console.log(`KdbxPage - 过滤后的有效列表长度: ${validOriginalList.length}, 原始长度: ${storedList.length}`);
       }
 
-      // 更新数据库列表
-      this.databaseItems = validList;
+      // 将原始数据转换为页面显示数据
+      this.databaseItems = validOriginalList.map(item => this.convertToDisplayItem(item));
 
-      // 同步首选项，去除无效项
-      PreferencesUtil.saveKdbxDatabaseListSync(JSON.stringify(validList));
+      // 同步首选项，去除无效项（保存原始数据）
+      PreferencesUtil.saveKdbxDatabaseListSync(JSON.stringify(validOriginalList));
 
-      // 根据首选项恢复当前数据库选择
+      // 根据首选项恢复当前密码库选择
       const currentId: string = PreferencesUtil.getKdbxCurrentDatabaseIdSync();
       if (currentId) {
         const found = this.databaseItems.find(item => item.id === currentId);
         if (found) {
           this.selectedDatabaseId = found.id;
-          this.selectedDatabase = found;
+          // 创建新的对象引用以确保 UI 更新
+          this.selectedDatabase = {
+            id: found.id,
+            name: found.name,
+            path: found.path,
+            lastModified: found.lastModified,
+            size: found.size,
+            displayDir: found.displayDir,
+            displayFileName: found.displayFileName,
+            displaySize: found.displaySize
+          };
         }
       }
        
     } catch (error) {
-      console.error('KdbxPage', '加载数据库列表失败:', error)
+      console.error('KdbxPage', '加载密码库列表失败:', error)
     }
   }
 
   /**
-   * 数据库项目点击处理
+   * 将原始密码库项目转换为页面显示项目
    */
-  private onDatabaseItemClick(item: DatabaseItem) {
-    this.selectedDatabaseId = item.id
-    this.selectedDatabase = item
+  private convertToDisplayItem(item: DatabaseItem): DisplayDatabaseItem {
+    // 使用 getDisplayPath 函数获取完整路径
+    const fullPath = this.getDisplayPath(item)
+    
+    let displayDir = ''
+    let displayFileName = item.path
+    
+    if (fullPath.includes('/')) {
+      displayDir = fullPath.substring(0, fullPath.lastIndexOf('/'))
+      displayFileName = fullPath.substring(fullPath.lastIndexOf('/') + 1)
+    } else {
+      displayDir = '应用数据目录'
+      displayFileName = fullPath
+    }
+    
+    let displaySize = ''
+    if (item.size >= 1024 * 1024) {
+      displaySize = `${(item.size / (1024 * 1024)).toFixed(2)} MB`
+    } else if (item.size >= 1024) {
+      displaySize = `${(item.size / 1024).toFixed(1)} KB`
+    } else {
+      displaySize = `${item.size} B`
+    }
+    
+    return {
+      id: item.id,
+      name: item.name,
+      path: item.path,
+      lastModified: item.lastModified,
+      size: item.size,
+      displayDir,
+      displayFileName,
+      displaySize
+    }
+  }
 
-    // 保存当前选择到首选项
-    PreferencesUtil.saveKdbxCurrentDatabaseIdSync(item.id)
+  /**
+   * 密码库项目点击处理 - 仅用于界面选中和查看信息，不改变当前使用的密码库
+   */
+  private onDatabaseItemClick(item: DisplayDatabaseItem) {
+    const currentTime = Date.now()
+    
+    console.log('KdbxPage', '点击事件触发，项目:', item.name, 'ID:', item.id)
+    
+    // 检测双击
+    if (this.lastClickedId === item.id && 
+        currentTime - this.lastClickTime < this.DOUBLE_CLICK_INTERVAL) {
+      console.log('KdbxPage', '检测到双击')
+      
+      // 重置双击检测状态
+      this.lastClickTime = 0
+      this.lastClickedId = ''
+      
+      this.onDatabaseItemDoubleClick(item)
+      return
+    }
+    
+    // 更新双击检测状态
+    this.lastClickTime = currentTime
+    this.lastClickedId = item.id
+    
+    // 延迟执行单击逻辑，避免与双击冲突
+    setTimeout(() => {
+      // 检查是否在延迟期间发生了双击
+      if (this.lastClickedId === item.id) {
+        console.log('KdbxPage', '执行单击逻辑')
+        this.selectedDatabaseId = item.id
+        // 创建新的对象引用以确保 UI 更新
+        this.selectedDatabase = {
+          id: item.id,
+          name: item.name,
+          path: item.path,
+          lastModified: item.lastModified,
+          size: item.size,
+          displayDir: item.displayDir,
+          displayFileName: item.displayFileName,
+          displaySize: item.displaySize
+        }
+      }
+    }, this.DOUBLE_CLICK_INTERVAL)
+  }
+
+  /**
+   * 密码库项目双击处理 - 切换到双击的密码库
+   */
+  private async onDatabaseItemDoubleClick(item: DisplayDatabaseItem) {
+
+    try {
+        const currentId: string = PreferencesUtil.getKdbxCurrentDatabaseIdSync();
+        
+        // 如果双击的就是当前密码库，不进行切换
+        if (item.id === currentId) {
+          return;
+        }
+        
+        // 关闭当前已经打开的密码库实例
+        KdbxCoreManager.getInstance().clearCurrentKdbxCore();
+        console.log('KdbxPage', '已关闭当前密码库实例');
+              
+        // 设置双击的密码库为当前密码库
+        PreferencesUtil.saveKdbxCurrentDatabaseIdSync(item.id);
+        
+        // 显示切换成功提示
+        this.switchSuccessMessage = `已切换到: ${item.name}`;
+        this.showSwitchSuccessToast = true;
+      
+      // 1秒后跳转回Index页面
+      setTimeout(async () => {
+        this.showSwitchSuccessToast = false;
+        try {
+          await router.replaceUrl({
+            url: 'pages/Index'
+          });
+          console.log('KdbxPage', '成功跳转到Index页面');
+        } catch (routerError) {
+          console.error('KdbxPage', '跳转失败:', routerError);
+          // 如果replaceUrl失败，尝试使用back
+          await router.back();
+        }
+      }, 2000);
+      
+    } catch (error) {
+      console.error('KdbxPage', '切换密码库失败:', error);
+      this.showFormError('切换密码库失败');
+    }
   }
 
   /**
@@ -194,24 +376,17 @@ struct KdbxPage {
   }
 
   /**
-   * 根据数据库项返回对应的图标资源
-   * - 当前使用的数据库（保存在首选项中）使用 select.png
-   * - 当前列表选中的数据库使用 selecte.png
-   * - 其他数据库使用 unselecte.png
+   * 根据密码库项返回对应的图标资源
+   * - 当前使用的密码库（保存在首选项中）使用 select.png
+   * - 其他密码库使用 unselect.png
    */
-  private getDatabaseIconRes(item: DatabaseItem): Resource {
+  private getDatabaseIconRes(item: DisplayDatabaseItem): Resource {
     const currentId: string = PreferencesUtil.getKdbxCurrentDatabaseIdSync();
-    if (item.id === currentId) {
-      return $r('app.media.select');
-    }
-    if (item.id === this.selectedDatabaseId) {
-      return $r('app.media.select');
-    }
-    return $r('app.media.unselect');
+    return item.id === currentId ? $r('app.media.select') : $r('app.media.unselect');
   }
 
   /**
-   * 获取用于显示的数据库文件完整路径
+   * 获取用于显示的密码库文件完整路径
    * 如果首选项中保存的 path 已经是绝对路径则直接返回；
    * 否则拼接 filesDir 形成完整路径，方便用户备份。
    */
@@ -254,17 +429,7 @@ struct KdbxPage {
     }
   }
 
-  private getDisplayDir(db: DatabaseItem): string {
-    const fullPath: string = this.getDisplayPath(db);
-    const idx: number = fullPath.lastIndexOf('/')
-    return idx !== -1 ? fullPath.substring(0, idx) : fullPath;
-  }
 
-  private getFileName(db: DatabaseItem): string {
-    const fullPath: string = this.getDisplayPath(db);
-    const idx: number = fullPath.lastIndexOf('/')
-    return idx !== -1 ? fullPath.substring(idx + 1) : fullPath;
-  }
 
   /** 复制文本到剪贴板并显示提示 */
   private async copyToClipboard(text: string): Promise<void> {
@@ -290,6 +455,23 @@ struct KdbxPage {
     } catch (e) {
       console.error('KdbxPage', '复制失败', e)
     }
+  }
+
+  /** 显示错误提示并自动隐藏 */
+  private showFormError(message: string): void {
+    // 清除旧定时器
+    if (this.formErrorTimer !== null) {
+      clearTimeout(this.formErrorTimer)
+      this.formErrorTimer = null
+    }
+
+    this.formError = message
+
+    // 3s 后隐藏错误提示
+    this.formErrorTimer = setTimeout(() => {
+      this.formError = ''
+      this.formErrorTimer = null
+    }, 3000)
   }
 
   /** 字段项视图，与 MainPage.DetailFieldView 一致 */
@@ -341,8 +523,10 @@ struct KdbxPage {
     })
   }
 
+
+
   /**
-   * 数据库信息查看面板
+   * 密码库信息查看面板
    */
   @Builder
   private InfoPanelView() {
@@ -350,11 +534,255 @@ struct KdbxPage {
       Column() {
         // 详细信息字段
         Column() {
-          this.DetailFieldView('数据库名称', this.selectedDatabase.name)
-          this.DetailFieldView('数据库路径', this.getDisplayDir(this.selectedDatabase))
-          this.DetailFieldView('数据库文件名', this.getFileName(this.selectedDatabase))
-          this.DetailFieldView('最后修改', this.selectedDatabase.lastModified)
-          this.DetailFieldView('大小', `${(this.selectedDatabase.size / 1024).toFixed(1)} KB`)
+          // 密码库名称
+          Column() {
+            Row() {
+              Text('密码库名称')
+                .fontSize(16)
+                .fontColor('#666')
+                .fontWeight(FontWeight.Medium)
+                .width(120)
+
+              Text(this.selectedDatabase.name)
+                .fontSize(16)
+                .fontColor('#000')
+                .layoutWeight(1)
+                .textAlign(TextAlign.Start)
+                .margin({ left: 8 })
+
+              Button('复制')
+                .fontSize(12)
+                .backgroundColor('#f0f0f0')
+                .fontColor('#000')
+                .borderRadius(3)
+                .padding({ left: 8, right: 8, top: 2, bottom: 2 })
+                .opacity(this.hoverFieldKey === '密码库名称' ? 1 : 0)
+                .onClick(() => {
+                  if (this.selectedDatabase) {
+                    this.copyToClipboard(this.selectedDatabase.name)
+                  }
+                })
+            }
+            .width('100%')
+            .padding({ left: 8, right: 8, top: 2, bottom: 2 })
+            .backgroundColor(this.hoverFieldKey === '密码库名称' ? '#f5f5f5' : '#fff')
+            .alignItems(VerticalAlign.Center)
+            .onHover((isHover: boolean) => {
+              this.hoverFieldKey = isHover ? '密码库名称' : (this.hoverFieldKey === '密码库名称' ? null : this.hoverFieldKey)
+            })
+
+            Divider()
+              .strokeWidth(1)
+              .color('#f0f0f0')
+              .margin({ top: 4, bottom: 8 })
+          }
+          .width('100%')
+          .alignItems(HorizontalAlign.Start)
+          .onClick(() => {
+            if (this.selectedDatabase) {
+              this.copyToClipboard(this.selectedDatabase.name)
+            }
+          })
+
+          // 密码库路径
+          Column() {
+            Row() {
+              Text('密码库路径')
+                .fontSize(16)
+                .fontColor('#666')
+                .fontWeight(FontWeight.Medium)
+                .width(120)
+
+              Text(this.selectedDatabase.displayDir)
+                .fontSize(16)
+                .fontColor('#000')
+                .layoutWeight(1)
+                .textAlign(TextAlign.Start)
+                .margin({ left: 8 })
+
+              Button('复制')
+                .fontSize(12)
+                .backgroundColor('#f0f0f0')
+                .fontColor('#000')
+                .borderRadius(3)
+                .padding({ left: 8, right: 8, top: 2, bottom: 2 })
+                .opacity(this.hoverFieldKey === '密码库路径' ? 1 : 0)
+                .onClick(() => {
+                  if (this.selectedDatabase) {
+                    this.copyToClipboard(this.selectedDatabase.displayDir)
+                  }
+                })
+            }
+            .width('100%')
+            .padding({ left: 8, right: 8, top: 2, bottom: 2 })
+            .backgroundColor(this.hoverFieldKey === '密码库路径' ? '#f5f5f5' : '#fff')
+            .alignItems(VerticalAlign.Center)
+            .onHover((isHover: boolean) => {
+              this.hoverFieldKey = isHover ? '密码库路径' : (this.hoverFieldKey === '密码库路径' ? null : this.hoverFieldKey)
+            })
+
+            Divider()
+              .strokeWidth(1)
+              .color('#f0f0f0')
+              .margin({ top: 4, bottom: 8 })
+          }
+          .width('100%')
+          .alignItems(HorizontalAlign.Start)
+          .onClick(() => {
+            if (this.selectedDatabase) {
+              this.copyToClipboard(this.selectedDatabase.displayDir)
+            }
+          })
+
+          // 密码库文件名
+          Column() {
+            Row() {
+              Text('密码库文件名')
+                .fontSize(16)
+                .fontColor('#666')
+                .fontWeight(FontWeight.Medium)
+                .width(120)
+
+              Text(this.selectedDatabase.displayFileName)
+                .fontSize(16)
+                .fontColor('#000')
+                .layoutWeight(1)
+                .textAlign(TextAlign.Start)
+                .margin({ left: 8 })
+
+              Button('复制')
+                .fontSize(12)
+                .backgroundColor('#f0f0f0')
+                .fontColor('#000')
+                .borderRadius(3)
+                .padding({ left: 8, right: 8, top: 2, bottom: 2 })
+                .opacity(this.hoverFieldKey === '密码库文件名' ? 1 : 0)
+                .onClick(() => {
+                  if (this.selectedDatabase) {
+                    this.copyToClipboard(this.selectedDatabase.displayFileName)
+                  }
+                })
+            }
+            .width('100%')
+            .padding({ left: 8, right: 8, top: 2, bottom: 2 })
+            .backgroundColor(this.hoverFieldKey === '密码库文件名' ? '#f5f5f5' : '#fff')
+            .alignItems(VerticalAlign.Center)
+            .onHover((isHover: boolean) => {
+              this.hoverFieldKey = isHover ? '密码库文件名' : (this.hoverFieldKey === '密码库文件名' ? null : this.hoverFieldKey)
+            })
+
+            Divider()
+              .strokeWidth(1)
+              .color('#f0f0f0')
+              .margin({ top: 4, bottom: 8 })
+          }
+          .width('100%')
+          .alignItems(HorizontalAlign.Start)
+          .onClick(() => {
+            if (this.selectedDatabase) {
+              this.copyToClipboard(this.selectedDatabase.displayFileName)
+            }
+          })
+
+          // 最后修改
+          Column() {
+            Row() {
+              Text('最后修改')
+                .fontSize(16)
+                .fontColor('#666')
+                .fontWeight(FontWeight.Medium)
+                .width(120)
+
+              Text(this.selectedDatabase.lastModified)
+                .fontSize(16)
+                .fontColor('#000')
+                .layoutWeight(1)
+                .textAlign(TextAlign.Start)
+                .margin({ left: 8 })
+
+              Button('复制')
+                .fontSize(12)
+                .backgroundColor('#f0f0f0')
+                .fontColor('#000')
+                .borderRadius(3)
+                .padding({ left: 8, right: 8, top: 2, bottom: 2 })
+                .opacity(this.hoverFieldKey === '最后修改' ? 1 : 0)
+                .onClick(() => {
+                  if (this.selectedDatabase) {
+                    this.copyToClipboard(this.selectedDatabase.lastModified)
+                  }
+                })
+            }
+            .width('100%')
+            .padding({ left: 8, right: 8, top: 2, bottom: 2 })
+            .backgroundColor(this.hoverFieldKey === '最后修改' ? '#f5f5f5' : '#fff')
+            .alignItems(VerticalAlign.Center)
+            .onHover((isHover: boolean) => {
+              this.hoverFieldKey = isHover ? '最后修改' : (this.hoverFieldKey === '最后修改' ? null : this.hoverFieldKey)
+            })
+
+            Divider()
+              .strokeWidth(1)
+              .color('#f0f0f0')
+              .margin({ top: 4, bottom: 8 })
+          }
+          .width('100%')
+          .alignItems(HorizontalAlign.Start)
+          .onClick(() => {
+            if (this.selectedDatabase) {
+              this.copyToClipboard(this.selectedDatabase.lastModified)
+            }
+          })
+
+          // 大小
+          Column() {
+            Row() {
+              Text('大小')
+                .fontSize(16)
+                .fontColor('#666')
+                .fontWeight(FontWeight.Medium)
+                .width(120)
+
+              Text(this.selectedDatabase.displaySize)
+                .fontSize(16)
+                .fontColor('#000')
+                .layoutWeight(1)
+                .textAlign(TextAlign.Start)
+                .margin({ left: 8 })
+
+              Button('复制')
+                .fontSize(12)
+                .backgroundColor('#f0f0f0')
+                .fontColor('#000')
+                .borderRadius(3)
+                .padding({ left: 8, right: 8, top: 2, bottom: 2 })
+                .opacity(this.hoverFieldKey === '大小' ? 1 : 0)
+                .onClick(() => {
+                  if (this.selectedDatabase) {
+                    this.copyToClipboard(this.selectedDatabase.displaySize)
+                  }
+                })
+            }
+            .width('100%')
+            .padding({ left: 8, right: 8, top: 2, bottom: 2 })
+            .backgroundColor(this.hoverFieldKey === '大小' ? '#f5f5f5' : '#fff')
+            .alignItems(VerticalAlign.Center)
+            .onHover((isHover: boolean) => {
+              this.hoverFieldKey = isHover ? '大小' : (this.hoverFieldKey === '大小' ? null : this.hoverFieldKey)
+            })
+
+            Divider()
+              .strokeWidth(1)
+              .color('#f0f0f0')
+              .margin({ top: 4, bottom: 8 })
+          }
+          .width('100%')
+          .alignItems(HorizontalAlign.Start)
+          .onClick(() => {
+            if (this.selectedDatabase) {
+              this.copyToClipboard(this.selectedDatabase.displaySize)
+            }
+          })
 
           Blank()
             .layoutWeight(1)
@@ -376,11 +804,11 @@ struct KdbxPage {
             .opacity(0.3)
             .margin({ bottom: 16 })
 
-          Text('选择一个数据库查看信息')
+          Text('选择一个密码库查看信息')
             .fontSize(16)
             .fontColor('#999')
 
-          Text('从左侧列表中选择要查看的数据库')
+          Text('从左侧列表中选择要查看的密码库')
             .fontSize(14)
             .fontColor('#ccc')
             .margin({ top: 8 })
@@ -404,10 +832,10 @@ struct KdbxPage {
   }
 
   /**
-   * 创建数据库项目视图
+   * 创建密码库项目视图
    */
   @Builder
-  private DatabaseItemView(item: DatabaseItem) {
+  private DatabaseItemView(item: DisplayDatabaseItem) {
     Row() {
       Image(this.getDatabaseIconRes(item))
         .width(20)
@@ -464,16 +892,16 @@ struct KdbxPage {
                 .fontColor('#000')
                 .margin({ bottom: 16 })
 
-              // 数据库名称
+              // 密码库名称
               Column() {
-                Text('数据库名称')
+                Text('密码库名称')
                   .fontSize(16)
                   .fontColor('#333')
                   .fontWeight(FontWeight.Medium)
                   .margin({ bottom: 8 })
 
                 TextInput({ 
-                  placeholder: '请输入数据库名称',
+                  placeholder: '请输入密码库名称',
                   text: this.selectedDatabase.name
                 })
                   .fontSize(16)
@@ -485,16 +913,16 @@ struct KdbxPage {
               .margin({ bottom: 16 })
               .alignItems(HorizontalAlign.Start)
 
-              // 数据库路径
+              // 密码库路径
               Column() {
-                Text('数据库路径')
+                Text('密码库路径')
                   .fontSize(16)
                   .fontColor('#333')
                   .fontWeight(FontWeight.Medium)
                   .margin({ bottom: 8 })
 
                 TextInput({ 
-                  placeholder: '请输入数据库路径',
+                  placeholder: '请输入密码库路径',
                   text: this.selectedDatabase.path
                 })
                   .fontSize(16)
@@ -515,7 +943,7 @@ struct KdbxPage {
                   .margin({ bottom: 8 })
 
                 TextArea({ 
-                  placeholder: '请输入数据库描述'
+                  placeholder: '请输入密码库描述'
                 })
                   .fontSize(16)
                   .border({ width: 1, color: '#ddd' })
@@ -576,11 +1004,11 @@ struct KdbxPage {
             .opacity(0.3)
             .margin({ bottom: 16 })
 
-          Text('选择一个数据库进行编辑')
+          Text('选择一个密码库进行编辑')
             .fontSize(16)
             .fontColor('#999')
 
-          Text('从左侧列表中选择要编辑的数据库')
+          Text('从左侧列表中选择要编辑的密码库')
             .fontSize(14)
             .fontColor('#ccc')
             .margin({ top: 8 })
@@ -596,36 +1024,300 @@ struct KdbxPage {
     }
   }
 
-  // 创建新数据库（示例实现：创建空记录并保存列表）
+  // 创建新密码库（示例实现：创建空记录并保存列表）
   private async createNewDatabase() {
-    try {
-      // 生成简单 ID 和默认名称
-      const newId = Date.now().toString();
-      const newName = `密码库_${this.databaseItems.length + 1}`;
-      const newPath = `${newName}.kdbx`;
+    // 进入创建表单模式
+    const defaultName: string = `我的密码库${this.databaseItems.length + 1}`;
+    this.newDbName = defaultName;
+    const defaultPath: string = `personal${this.databaseItems.length + 1}`;
+    this.newDbPath = `${defaultPath}.kdbx`;
+    this.isAddingDatabase = true;
+  }
 
-      const newItem: DatabaseItem = {
+  /** 保存新密码库条目 */
+  private async saveNewDatabase() {
+    if (!this.newDbName.trim()) {
+      this.showFormError('名称不能为空');
+      return;
+    }
+    if (!this.newPassword.trim() || this.newPassword.length < 8) {
+      this.showFormError('密码至少8位');
+      return;
+    }
+    if (this.newPassword !== this.confirmPassword) {
+      this.showFormError('两次密码不一致');
+      return;
+    }
+
+    if (this.newDbPath.includes('/')) {
+      this.showFormError('仅输入文件名，不含路径');
+      return;
+    }
+    if (!this.isValidKdbxFileName(this.newDbPath.trim())) {
+      this.showFormError('文件名仅允许英文、数字、下划线，且以 .kdbx 结尾');
+      return;
+    }
+
+    try {
+      const context = getContext(this) as Context;
+      const fileNameOnly: string = this.newDbPath.trim();
+      const finalPath: string = `${context.filesDir}/${fileNameOnly}`;
+
+      // 检查文件是否已经存在
+      let fileExists = false;
+      try {
+        if (fileNameOnly.includes('/')) {
+          // 绝对路径，直接检查
+          await fs.access(fileNameOnly);
+          fileExists = true;
+        } else {
+          // 相对路径（文件名），通过 DatabaseFileManager 检查
+          if (this.databaseFileManager) {
+            fileExists = await this.databaseFileManager.fileExists(fileNameOnly);
+          }
+        }
+        
+        if (fileExists) {
+          this.showFormError(`文件 ${fileNameOnly} 已存在，请使用其他文件名`);
+          return;
+        }
+        
+        console.log('KdbxPage', '文件不存在，可以创建:', finalPath);
+      } catch (error) {
+        console.log('KdbxPage', '检查文件存在性时发生错误:', error);
+        // 如果检查失败，为了安全起见，继续创建流程
+      }
+
+      // 使用 KdbxCore 创建密码库并加入两条测试条目
+      const core = new KdbxCore();
+      const createResult = await core.createNew(this.newPassword, this.newDbName.trim());
+      if (!createResult.success || !createResult.data) {
+        this.showFormError(createResult.error || '创建密码库失败');
+        return;
+      }
+
+      const db = createResult.data;
+      const root = db.getDefaultGroup();
+      if (root) {
+        const entry1 = db.createEntry(root);
+        entry1.fields.set('Title', '示例1');
+        entry1.fields.set('UserName', 'user1');
+        entry1.fields.set('Password', ProtectedValue.fromString('pass1'));
+
+        const entry2 = db.createEntry(root);
+        entry2.fields.set('Title', '示例2');
+        entry2.fields.set('UserName', 'user2');
+        entry2.fields.set('Password', ProtectedValue.fromString('pass2'));
+      }
+
+      // 保存密码库到文件
+      const fileManager = new DatabaseFileManager(getContext(this) as Context);
+      const saveRes = await fileManager.saveDatabaseToFile(db, fileNameOnly, true);
+      if (!saveRes.success) {
+        this.showFormError(saveRes.error || '保存密码库失败');
+        return;
+      }
+
+      const actualPath: string = saveRes.data ?? fileManager.getFilePath(fileNameOnly);
+
+      let size = 0;
+      try { const stat = await fs.stat(actualPath); size = stat.size; } catch(_) {}
+
+      const newId: string = Date.now().toString();
+      const newOriginalItem: DatabaseItem = {
         id: newId,
-        name: newName,
-        path: newPath,
+        name: this.newDbName.trim(),
+        path: fileNameOnly,  // 保存相对路径（只是文件名），与现有检查逻辑保持一致
         lastModified: new Date().toISOString().split('T')[0],
-        size: 0
+        size: size
       };
 
-      // 更新列表
-      this.databaseItems = [...this.databaseItems, newItem];
+      // 获取现有的配置项列表并追加新密码库
+      let currentOriginalList: DatabaseItem[] = [];
+      try {
+        const listJson = PreferencesUtil.getKdbxDatabaseListSync();
+        currentOriginalList = JSON.parse(listJson) as DatabaseItem[];
+      } catch (e) {
+        currentOriginalList = [];
+      }
+      
+      // 追加新密码库到配置项列表
+      currentOriginalList.push(newOriginalItem);
+      console.log(`KdbxPage - 保存新的密码库列表:`, currentOriginalList.map(item => `${item.name}(ID:${item.id})`).join(', '));
+      PreferencesUtil.saveKdbxDatabaseListSync(JSON.stringify(currentOriginalList));
 
-      // 保存到首选项
-      PreferencesUtil.saveKdbxDatabaseListSync(JSON.stringify(this.databaseItems));
-      PreferencesUtil.saveKdbxCurrentDatabaseIdSync(newId);
+      // 转换为显示项目并更新页面显示列表  
+      const newDisplayItem = this.convertToDisplayItem(newOriginalItem);
+      this.databaseItems.push(newDisplayItem);
+      // 不自动切换当前使用的密码库，保持原有的密码库不变
 
-      // 更新界面选择
+      // 退出创建模式并选中新建的密码库（仅在界面上选中，不改变当前使用的密码库）
+      this.isAddingDatabase = false;
       this.selectedDatabaseId = newId;
-      this.selectedDatabase = newItem;
+      // 创建新的对象引用以确保 UI 更新
+      this.selectedDatabase = {
+        id: newDisplayItem.id,
+        name: newDisplayItem.name,
+        path: newDisplayItem.path,
+        lastModified: newDisplayItem.lastModified,
+        size: newDisplayItem.size,
+        displayDir: newDisplayItem.displayDir,
+        displayFileName: newDisplayItem.displayFileName,
+        displaySize: newDisplayItem.displaySize
+      };
 
     } catch (e) {
-      console.error('KdbxPage', '创建新数据库失败:', e);
+      console.error('KdbxPage', '保存新密码库失败', e);
+      this.showFormError('创建密码库时发生异常');
     }
+  }
+
+  private cancelNewDatabase() {
+    this.isAddingDatabase = false;
+    this.newPassword = '';
+    this.confirmPassword = '';
+    
+    // 清除错误提示和定时器
+    if (this.formErrorTimer !== null) {
+      clearTimeout(this.formErrorTimer);
+      this.formErrorTimer = null;
+    }
+    this.formError = '';
+  }
+
+  /** 新增密码库表单视图 */
+  @Builder
+  private CreateDatabaseFormView() {
+    Column() {
+      // 表单内容
+      Column() {
+        // 名称
+        Column() {
+          Text('密码库名称')
+            .fontSize(16)
+            .fontColor('#333')
+            .fontWeight(FontWeight.Medium)
+            .margin({ bottom: 8 })
+
+          TextInput({ text: this.newDbName, placeholder: '请输入密码库名称' })
+            .onChange((val: string) => {
+              this.newDbName = val;
+            })
+            .fontSize(16)
+            .border({ width: 1, color: '#ddd' })
+            .borderRadius(4)
+            .padding(12)
+        }
+        .width('100%')
+        .margin({ bottom: 16 })
+        .alignItems(HorizontalAlign.Start)
+
+        // 路径
+        Column() {
+          Text('文件名或完整路径')
+            .fontSize(16)
+            .fontWeight(FontWeight.Medium)
+            .fontColor('#333')
+            .margin({ bottom: 6 })
+
+          TextInput({ text: this.newDbPath, placeholder: '如 mydb.kdbx 或 /storage/XXX/mydb.kdbx' })
+            .onChange((val: string) => {
+              this.newDbPath = val;
+            })
+            .fontSize(16)
+            .border({ width: 1, color: '#ddd' })
+            .borderRadius(4)
+            .padding(12)
+        }
+        .width('100%')
+        .margin({ bottom: 16 })
+        .alignItems(HorizontalAlign.Start)
+
+        // 密码
+        Column() {
+          Text('主密码')
+            .fontSize(16)
+            .fontWeight(FontWeight.Medium)
+            .fontColor('#333')
+            .margin({ bottom: 6 })
+
+          TextInput({ text: this.newPassword, placeholder: '请输入主密码' })
+            .type(InputType.Password)
+            .onChange((val: string) => {
+              this.newPassword = val;
+            })
+            .fontSize(16)
+            .border({ width: 1, color: '#ddd' })
+            .borderRadius(4)
+            .padding(12)
+        }
+        .width('100%')
+        .margin({ bottom: 16 })
+        .alignItems(HorizontalAlign.Start)
+
+        // 确认密码
+        Column() {
+          Text('确认密码')
+            .fontSize(16)
+            .fontWeight(FontWeight.Medium)
+            .fontColor('#333')
+            .margin({ bottom: 6 })
+
+          TextInput({ text: this.confirmPassword, placeholder: '再次输入主密码' })
+            .type(InputType.Password)
+            .onChange((val: string) => {
+              this.confirmPassword = val;
+            })
+            .fontSize(16)
+            .border({ width: 1, color: '#ddd' })
+            .borderRadius(4)
+            .padding(12)
+        }
+        .width('100%')
+        .margin({ bottom: 16 })
+        .alignItems(HorizontalAlign.Start)
+
+        // 内联错误提示已移除，统一到底部Toast显示
+
+        // 按钮行
+        Row() {
+          Button('创建新的密码库')
+            .width('30%')
+            .height(50)
+            .fontSize(16)
+            .fontWeight(FontWeight.Medium)
+            .backgroundColor('#4CAF50')
+            .borderRadius(8)
+            .margin({ right: 5 })
+            .onClick(() => {
+              this.saveNewDatabase();
+            })
+
+          Button('取消')
+            .height(50)
+            .fontSize(16)
+            .backgroundColor('#f0f0f0')
+            .fontColor('#000')
+            .padding({ left: 20, right: 20, top: 10, bottom: 10 })
+            .borderRadius(6)
+            .onClick(() => {
+              this.cancelNewDatabase();
+            })
+        }
+        .width('100%')
+        .margin({ top: 12 })
+
+      }
+      .width('100%')
+      .padding({ left: 20, right: 20, top: 16, bottom: 16 })
+    }
+    .width('100%')
+    .height('100%')
+  }
+
+  private isValidKdbxFileName(fileName: string): boolean {
+    const pattern: RegExp = /^[A-Za-z0-9_]+\.kdbx$/;
+    return pattern.test(fileName);
   }
 
   build() {
@@ -661,10 +1353,10 @@ struct KdbxPage {
     } else {
       // 主界面
       Row() {
-        // 第一栏：数据库列表
+        // 第一栏：密码库列表
         if (!this.isFirstColumnCollapsed) {
           Column() {
-            // 数据库列表标题
+            // 密码库列表标题
             Row() {
               Image($r('app.media.down_arrow'))
                 .width(16)
@@ -703,7 +1395,7 @@ struct KdbxPage {
             .backgroundColor('#f8f9fa')
             .border({ width: { bottom: 1 }, color: '#e0e0e0' })
 
-            // 数据库列表
+            // 密码库列表
             if (this.isLoading) {
               Column() {
                 LoadingProgress()
@@ -723,11 +1415,11 @@ struct KdbxPage {
                   .opacity(0.3)
                   .margin({ bottom: 12 })
 
-                Text('暂无数据库')
+                Text('暂无密码库')
                   .fontSize(16)
                   .fontColor('#999')
                   
-                Text('点击右上角创建新数据库')
+                Text('点击右上角创建新密码库')
                   .fontSize(14)
                   .fontColor('#ccc')
                   .margin({ top: 8 })
@@ -739,8 +1431,8 @@ struct KdbxPage {
             } else {
               Scroll() {
                 Column() {
-                  // 数据库列表项
-                  ForEach(this.databaseItems, (item: DatabaseItem) => {
+                  // 密码库列表项
+                  ForEach(this.databaseItems, (item: DisplayDatabaseItem) => {
                     Column() {
                       this.DatabaseItemView(item)
                       
@@ -750,7 +1442,7 @@ struct KdbxPage {
                         .color('#e0e0e0')
                         .margin({ left: 16, right: 0 })
                     }
-                  }, (item: DatabaseItem) => item.id)
+                  }, (item: DisplayDatabaseItem) => item.id)
 
                   // 新增密码库按钮
                   Button() {
@@ -768,7 +1460,7 @@ struct KdbxPage {
                   .backgroundColor('#f0f7ff')
                   .border({ width: 1, color: '#007AFF', style: BorderStyle.Dashed })
                   .borderRadius(6)
-                  .margin({ left: 16, right: 16, top: 8, bottom: 16 })
+                  .margin({ left: 16, right: 16, top: 20, bottom: 16 })
                   .onClick(() => {
                     this.createNewDatabase();
                   })
@@ -781,6 +1473,30 @@ struct KdbxPage {
               .layoutWeight(1)
               .backgroundColor('#fff')
               .align(Alignment.TopStart)
+            }
+            
+            // 切换密码库成功提示
+            if (this.showSwitchSuccessToast) {
+              Row() {
+                Image($r('app.media.success'))
+                  .width(16)
+                  .height(16)
+                  .fillColor('#52c41a')
+                  .margin({ right: 8 })
+
+                Text(this.switchSuccessMessage)
+                  .fontSize(14)
+                  .fontColor('#52c41a')
+                  .fontWeight(FontWeight.Medium)
+              }
+              .width('100%')
+              .height(40)
+              .padding({ left: 16, right: 16 })
+              .backgroundColor('#f6ffed')
+              .border({ width: { top: 1 }, color: '#b7eb8f' })
+              .alignItems(VerticalAlign.Center)
+              .justifyContent(FlexAlign.Center)
+              .transition(TransitionEffect.opacity(1).animation({ duration: 300 }))
             }
           }
           .width(this.firstColumnWidth)
@@ -812,30 +1528,33 @@ struct KdbxPage {
         Column() {
           // 编辑面板顶部工具栏
           Row() {
-            Text(this.selectedDatabase ? this.selectedDatabase.name : '未选择密码库')
-              .fontSize(18)
-              .fontWeight(FontWeight.Medium)
-              .fontColor('#000')
-              .layoutWeight(1)
-              .maxLines(1)
-              .textOverflow({ overflow: TextOverflow.Ellipsis })
+            Text(this.isAddingDatabase ? '创建密码库' : (this.selectedDatabase ? this.selectedDatabase.name : '未选择密码库'))
+               .fontSize(18)
+               .fontWeight(FontWeight.Medium)
+               .fontColor('#000')
+               .layoutWeight(1)
+               .maxLines(1)
+               .textOverflow({ overflow: TextOverflow.Ellipsis })
 
-            Button() {
-              Image($r('app.media.edit'))
-                .width(20)
-                .height(20)
-                .fillColor(this.selectedDatabase ? '#007AFF' : '#CCCCCC')
-            }
-            .backgroundColor('transparent')
-            .padding(4)
-            .stateEffect(false)
-            .opacity(this.selectedDatabase ? 1 : 0.4)
-            .onClick(() => {
-              if (this.selectedDatabase) {
-                // TODO: 进入编辑模式或弹出编辑对话框
-                console.log('KdbxPage', '编辑数据库', this.selectedDatabase.name)
+            if (!this.isAddingDatabase) {
+              Button() {
+                Image($r('app.media.edit'))
+                  .width(20)
+                  .height(20)
+                  .fillColor(this.selectedDatabase ? '#007AFF' : '#CCCCCC')
               }
-            })
+              .backgroundColor('transparent')
+              .padding(4)
+              .stateEffect(false)
+              .opacity(this.selectedDatabase ? 1 : 0.4)
+              .onClick(() => {
+                if (this.selectedDatabase) {
+                  // TODO: 进入编辑模式或弹出编辑对话框
+                  console.log('KdbxPage', '编辑密码库', this.selectedDatabase.name)
+                }
+              })
+            }
+ 
           }
           .width('100%')
           .height(50)
@@ -845,14 +1564,34 @@ struct KdbxPage {
 
           // 内容区域：默认查看信息
           Column() {
-            this.InfoPanelView()
+            if (this.isAddingDatabase) {
+              this.CreateDatabaseFormView()
+            } else {
+              this.InfoPanelView()
+            }
           }
           .layoutWeight(1)
           .width('100%')
           .backgroundColor('#fff')
+          .key(`info_panel_${this.selectedDatabase?.id || 'none'}`)
 
           // 复制成功提示（第二栏底部）
-          if (this.showCopySuccessToast) {
+          if (this.formError) {
+            Row() {
+              Text(this.formError)
+                .fontSize(14)
+                .fontColor('#ff4d4f')
+                .fontWeight(FontWeight.Medium)
+            }
+            .width('100%')
+            .height(40)
+            .padding({ left: 20, right: 20 })
+            .backgroundColor('#fff1f0')
+            .border({ width: { top: 1 }, color: '#ffa39e' })
+            .alignItems(VerticalAlign.Center)
+            .justifyContent(FlexAlign.Center)
+            .transition(TransitionEffect.opacity(1).animation({ duration: 300 }))
+          } else if (this.showCopySuccessToast) {
             Row() {
               Image($r('app.media.success'))
                 .width(16)

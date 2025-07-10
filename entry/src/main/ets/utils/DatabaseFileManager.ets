@@ -36,6 +36,11 @@ export class DatabaseFileManager {
         return false;
       }
 
+      // 检查文件名是否为空或无效
+      if (!fileName || fileName.trim() === '') {
+        return false;
+      }
+
       const filePath = this.getFilePath(fileName);
       
       // 使用和启动时相同的检测逻辑
@@ -64,9 +69,9 @@ export class DatabaseFileManager {
   /**
    * 保存数据库到文件
    */
-  async saveDatabaseToFile(database: Kdbx, fileName: string): Promise<OperationResult<string>> {
-    // 若数据库未标记为脏，则跳过保存
-    if (!DirtyFlag.dirty) {
+  async saveDatabaseToFile(database: Kdbx, fileName: string, forceSave: boolean = false): Promise<OperationResult<string>> {
+    // 若数据库未标记为脏且不是强制保存，则跳过保存
+    if (!DirtyFlag.dirty && !forceSave) {
       return {
         success: true,
         data: ''

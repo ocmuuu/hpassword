@@ -2,7 +2,8 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import { router } from '@kit.ArkUI';
 import { common } from '@kit.AbilityKit';
 import { DefaultDatabase } from '../utils/DefaultDatabase';
-import { KdbxCoreManager } from '../utils/KdbxCore';
+import { KdbxCore, KdbxCoreManager } from '../utils/KdbxCore';
+import { DatabaseFileManager } from '../utils/DatabaseFileManager';
 import { runDatabaseCRUDTest } from '../test/DatabaseCRUDTest';
 import { KDF_ROUNDS_PRESETS, DEFAULT_KDF_ROUNDS, getSecurityLevelName, KdfRoundsPreset } from '../utils/KdbxConstants';
 import fs from '@ohos.file.fs';
@@ -61,59 +62,111 @@ struct Index {
   }
 
   /**
-   * 检查默认数据库是否存在 - 不涉及数据库操作，只检查文件
+   * 检查数据库是否存在 - 优先检查配置的数据库，如果不存在则fallback到默认数据库
    */
   async checkDatabaseExists() {
     try {
       // 获取应用上下文
       const context = getContext() as common.UIAbilityContext;
       
-      // 构建数据库文件路径
-      const dbFileName = 'default.kdbx';
-      const dbPath = `${context.filesDir}/${dbFileName}`;
+      // 获取当前选择的数据库ID
+      const currId: string = PreferencesUtil.getKdbxCurrentDatabaseIdSync();
+      console.log('Index', '当前配置的数据库ID:', currId);
       
-      // 使用文件系统API检查文件是否存在
-      try {
-        await fs.access(dbPath);
-        
-        // 尝试获取文件信息以确认文件有效
+      let needFallbackToDefault = false;
+      
+      // 如果没有配置当前数据库，直接fallback到默认数据库
+      if (!currId || currId.trim() === '') {
+        console.log('Index', '没有配置当前数据库，设置为默认数据库');
+        needFallbackToDefault = true;
+      } else {
+        // 检查配置的数据库是否存在
+        let currentDb: DatabaseItem | null = null;
         try {
-          const stat = await fs.stat(dbPath);
+          const listJson: string = PreferencesUtil.getKdbxDatabaseListSync();
+          const list: DatabaseItem[] = JSON.parse(listJson) as DatabaseItem[];
+          currentDb = list.find((it: DatabaseItem) => it.id === currId) || null;
+          console.log('Index', '找到当前数据库:', currentDb?.name || '未找到');
+        } catch (e) {
+          console.error('Index', '解析数据库列表失败:', e);
+          needFallbackToDefault = true;
+        }
+        
+        if (!currentDb) {
+          console.log('Index', '当前数据库在列表中不存在，设置为默认数据库');
+          needFallbackToDefault = true;
+        } else {
+          // 检查配置的数据库文件是否存在
+          let dbPath: string;
+          if (currentDb.path.includes('/')) {
+            // 绝对路径
+            dbPath = currentDb.path;
+          } else {
+            // 相对路径（文件名）
+            dbPath = `${context.filesDir}/${currentDb.path}`;
+          }
           
-          // 只有文件大小大于0才认为是有效的数据库文件
+          console.log('Index', '检查数据库文件:', dbPath);
+          
+          try {
+            await fs.access(dbPath);
+            const stat = await fs.stat(dbPath);
+            
+            if (stat.size > 0) {
+              // 配置的数据库存在且有效
+              this.databaseExists = true;
+              this.currentDatabaseName = currentDb.name;
+              console.log('Index', '配置的数据库文件存在且有效:', currentDb.name);
+              return;
+            } else {
+              console.log('Index', '配置的数据库文件大小为0，设置为默认数据库');
+              needFallbackToDefault = true;
+            }
+          } catch (accessError) {
+            console.log('Index', '配置的数据库文件不存在，设置为默认数据库:', accessError);
+            needFallbackToDefault = true;
+          }
+        }
+      }
+      
+      // 如果需要fallback到默认数据库
+      if (needFallbackToDefault) {
+        console.log('Index', '设置当前数据库为默认数据库');
+        PreferencesUtil.saveKdbxCurrentDatabaseIdSync('default');
+        
+        // 检查默认数据库是否存在
+        const defaultDbPath = `${context.filesDir}/default.kdbx`;
+        console.log('Index', '检查默认数据库文件:', defaultDbPath);
+        
+        try {
+          await fs.access(defaultDbPath);
+          const stat = await fs.stat(defaultDbPath);
+          
           if (stat.size > 0) {
             this.databaseExists = true;
+            this.currentDatabaseName = '默认密码库';
+            console.log('Index', '默认数据库文件存在且有效');
+            
+            // 确保默认数据库在数据库列表中
+            this.ensureDefaultDatabaseInList(stat.size);
           } else {
             this.databaseExists = false;
+            this.currentDatabaseName = '默认密码库';
+            console.log('Index', '默认数据库文件大小为0，需要创建');
           }
-        } catch (statError) {
-          // access成功但stat失败，认为文件不存在
+        } catch (accessError) {
           this.databaseExists = false;
+          this.currentDatabaseName = '默认密码库';
+          console.log('Index', '默认数据库文件不存在，需要创建');
         }
-      } catch (accessError) {
-        this.databaseExists = false;
       }
       
     } catch (error) {
       hilog.error(0, TAG, '检查文件失败: %{public}s', (error as Error).message);
       this.databaseExists = false;
+      this.currentDatabaseName = '默认密码库';
     } finally {
       this.isLoading = false;
-
-      // 加载首选项中的当前数据库名称
-      const currId: string = PreferencesUtil.getKdbxCurrentDatabaseIdSync();
-      let name = '默认密码库';
-      try {
-        const listJson: string = PreferencesUtil.getKdbxDatabaseListSync();
-        const list: DatabaseItem[] = JSON.parse(listJson) as DatabaseItem[];
-        if (currId && Array.isArray(list)) {
-          const found: DatabaseItem | undefined = list.find((it: DatabaseItem)=> it.id === currId);
-          if (found && found.name) {
-            name = found.name;
-          }
-        }
-      } catch(e) {}
-      this.currentDatabaseName = name;
     }
   }
 
@@ -126,6 +179,46 @@ struct Index {
       this.defaultDatabase = DefaultDatabase.getInstance();
       this.defaultDatabase.setContext(context);
       hilog.info(0, TAG, 'DefaultDatabase实例已初始化');
+    }
+  }
+
+  /**
+   * 确保默认数据库在数据库列表中
+   */
+  private ensureDefaultDatabaseInList(size: number): void {
+    try {
+      const defaultDbItem: DatabaseItem = { 
+        id: 'default', 
+        name: '默认密码库', 
+        path: 'default.kdbx',
+        lastModified: new Date().toISOString().split('T')[0], 
+        size 
+      } as DatabaseItem;
+      
+      // 获取现有的数据库列表
+      let currentList: DatabaseItem[] = [];
+      try {
+        const listJson = PreferencesUtil.getKdbxDatabaseListSync();
+        currentList = JSON.parse(listJson) as DatabaseItem[];
+      } catch (e) {
+        currentList = [];
+      }
+      
+      // 检查是否已经存在默认数据库
+      const defaultIndex = currentList.findIndex(item => item.id === 'default');
+      if (defaultIndex >= 0) {
+        // 更新现有的默认数据库信息
+        currentList[defaultIndex] = defaultDbItem;
+      } else {
+        // 添加默认数据库到列表开头
+        currentList.unshift(defaultDbItem);
+      }
+      
+      // 保存更新后的列表
+      PreferencesUtil.saveKdbxDatabaseListSync(JSON.stringify(currentList));
+      console.log('Index', '默认数据库已添加到数据库列表');
+    } catch (e) {
+      console.error('Index', '添加默认数据库到列表失败:', e);
     }
   }
 
@@ -231,13 +324,16 @@ struct Index {
       // 保存数据库列表和当前ID
       try {
         const context = getContext() as common.UIAbilityContext;
-        const dbFileName = 'default.kdbx';
-        const dbPath = `${context.filesDir}/${dbFileName}`;
+        const dbPath = `${context.filesDir}/default.kdbx`;
         let size = 0;
         try { const stat = await fs.stat(dbPath); size = stat.size; } catch(e){}
-        const dbItem: DatabaseItem = { id: 'default', name: '默认密码库', path: dbPath, lastModified: new Date().toISOString().split('T')[0], size } as DatabaseItem;
-        PreferencesUtil.saveKdbxDatabaseListSync(JSON.stringify([dbItem] as DatabaseItem[]));
+        
+        // 添加默认数据库到列表
+        this.ensureDefaultDatabaseInList(size);
+        
+        // 设置当前数据库为默认数据库
         PreferencesUtil.saveKdbxCurrentDatabaseIdSync('default');
+        console.log('Index', '默认数据库创建完成并添加到列表');
       } catch(e) { console.error('Index', '保存数据库列表失败', e); }
       
     } catch (error) {
@@ -251,9 +347,9 @@ struct Index {
   }
 
   /**
-   * 打开现有数据库
+   * 打开当前选择的数据库
    */
-  async openDefaultDatabase() {
+  async openCurrentDatabase() {
     if (!this.password.trim()) {
       this.errorMessage = '请输入密码';
       return;
@@ -264,40 +360,117 @@ struct Index {
     this.openingProgress = '正在验证密码...';
 
     try {
-      hilog.info(0, TAG, '开始打开默认数据库...');
+      // 获取当前选择的数据库ID
+      const currId: string = PreferencesUtil.getKdbxCurrentDatabaseIdSync();
+      console.log('Index', '打开数据库，当前ID:', currId);
       
-      // 初始化DefaultDatabase实例
-      this.initializeDefaultDatabase();
-      
-      // 使用DefaultDatabase打开数据库
-      this.openingProgress = '正在解密数据库...';
-      const result = await this.defaultDatabase!.open(this.password);
-
-      if (!result.success) {
-        const rawErr = result.error || '';
-        if (rawErr.includes('Invalid') || rawErr.toLowerCase().includes('wrong key')) {
-          // 在按钮上显示 "密码错误" 2 秒
-          this.openBtnError = true;
-          this.openBtnErrorText = '密码错误';
-          // 直接清空密码，用户可以重新输入
-          this.password = '';
-          this.capsLockOn = false; // 清除大写锁定状态
-          setTimeout(() => {
-            this.openBtnError = false;
-            this.openBtnErrorText = '';
-          }, 2000);
-        } else {
-          this.errorMessage = '打开数据库失败：' + rawErr;
-        }
+      if (!currId || currId.trim() === '') {
+        this.errorMessage = '没有选择要打开的数据库';
         return;
       }
-
-      hilog.info(0, TAG, '数据库打开成功');
-      this.openingProgress = '正在初始化界面...';
       
-      // 设置全局KdbxCore实例
-      if (result.data) {
-        KdbxCoreManager.getInstance().setCurrentKdbxCore(result.data);
+      // 从数据库列表中获取当前数据库信息
+      let currentDb: DatabaseItem | null = null;
+      try {
+        const listJson: string = PreferencesUtil.getKdbxDatabaseListSync();
+        const list: DatabaseItem[] = JSON.parse(listJson) as DatabaseItem[];
+        currentDb = list.find((it: DatabaseItem) => it.id === currId) || null;
+      } catch (e) {
+        this.errorMessage = '获取数据库信息失败';
+        return;
+      }
+      
+      if (!currentDb) {
+        this.errorMessage = '当前数据库在列表中不存在';
+        return;
+      }
+      
+      console.log('Index', '开始打开数据库:', currentDb.name);
+      hilog.info(0, TAG, '开始打开数据库: %{public}s', currentDb.name);
+      
+      // 如果是默认数据库，使用DefaultDatabase实例
+      if (currId === 'default') {
+        // 初始化DefaultDatabase实例
+        this.initializeDefaultDatabase();
+        
+        // 使用DefaultDatabase打开数据库
+        this.openingProgress = '正在解密数据库...';
+        const result = await this.defaultDatabase!.open(this.password);
+
+        if (!result.success) {
+          const rawErr = result.error || '';
+          if (rawErr.includes('Invalid') || rawErr.toLowerCase().includes('wrong key')) {
+            // 在按钮上显示 "密码错误" 2 秒
+            this.openBtnError = true;
+            this.openBtnErrorText = '密码错误';
+            // 直接清空密码，用户可以重新输入
+            this.password = '';
+            this.capsLockOn = false; // 清除大写锁定状态
+            setTimeout(() => {
+              this.openBtnError = false;
+              this.openBtnErrorText = '';
+            }, 2000);
+          } else {
+            this.errorMessage = '打开数据库失败：' + rawErr;
+          }
+          return;
+        }
+
+        hilog.info(0, TAG, '数据库打开成功');
+        this.openingProgress = '正在初始化界面...';
+        
+        // 设置全局KdbxCore实例
+        if (result.data) {
+          KdbxCoreManager.getInstance().setCurrentKdbxCore(result.data);
+        }
+        
+      } else {
+        // 非默认数据库，使用KdbxCore和DatabaseFileManager打开
+        const context = getContext() as common.UIAbilityContext;
+        
+        console.log('Index', '打开数据库文件:', currentDb.path);
+        this.openingProgress = '正在解密数据库...';
+        
+        // 使用DatabaseFileManager读取文件
+        const fileManager = new DatabaseFileManager(context);
+        const readResult = await fileManager.readDatabaseFromFile(currentDb.path);
+        
+        if (!readResult.success || !readResult.data) {
+          this.errorMessage = '读取数据库文件失败：' + (readResult.error || '');
+          return;
+        }
+        
+        // 创建KdbxCore实例并加载数据库
+        const kdbxCore = new KdbxCore();
+        const loadResult = await kdbxCore.loadFromBuffer(readResult.data, {
+          password: this.password,
+          validateIntegrity: true
+        });
+
+        if (!loadResult.success) {
+          const rawErr = loadResult.error || '';
+          if (rawErr.includes('Invalid') || rawErr.toLowerCase().includes('wrong key')) {
+            // 在按钮上显示 "密码错误" 2 秒
+            this.openBtnError = true;
+            this.openBtnErrorText = '密码错误';
+            // 直接清空密码，用户可以重新输入
+            this.password = '';
+            this.capsLockOn = false; // 清除大写锁定状态
+            setTimeout(() => {
+              this.openBtnError = false;
+              this.openBtnErrorText = '';
+            }, 2000);
+          } else {
+            this.errorMessage = '打开数据库失败：' + rawErr;
+          }
+          return;
+        }
+
+        hilog.info(0, TAG, '数据库打开成功');
+        this.openingProgress = '正在初始化界面...';
+        
+        // 设置全局KdbxCore实例
+        KdbxCoreManager.getInstance().setCurrentKdbxCore(kdbxCore);
       }
       
       // 跳转到主界面
@@ -435,10 +608,27 @@ struct Index {
   @Builder
   buildLoginForm() {
     Column() {
-      Text(`输入 ${this.currentDatabaseName} 主密码`)
-        .fontSize(18)
-        .fontWeight(FontWeight.Medium)
-        .margin({ bottom: 30 })
+      // 使用Row布局来突出显示密码库名称
+      Row() {
+        Text('输入 ')
+          .fontSize(18)
+          .fontWeight(FontWeight.Medium)
+          .fontColor('#333333')
+        
+        Text(this.currentDatabaseName)
+          .fontSize(18)
+          .fontWeight(FontWeight.Bold)
+          .fontColor('#1976D2')
+        
+        Text(' 主密码')
+          .fontSize(18)
+          .fontWeight(FontWeight.Medium)
+          .fontColor('#333333')
+      }
+      .margin({ bottom: 30 })
+      .width('100%')
+      .justifyContent(FlexAlign.Center)
+      .alignItems(VerticalAlign.Center)
       
       // 密码输入框
       TextInput({ placeholder: '请输入主密码', text: this.password })
@@ -456,7 +646,7 @@ struct Index {
           this.checkCapsLockByText(value);
         })
         .onSubmit(() => {
-          this.openDefaultDatabase();
+          this.openCurrentDatabase();
         })
         .margin({ bottom: 10 })
       
@@ -482,7 +672,7 @@ struct Index {
         .borderRadius(8)
         .enabled(!this.isOpening)
         .onClick(() => {
-          this.openDefaultDatabase();
+          this.openCurrentDatabase();
         })
       
       // 打开进度占位（总高度 60px）
