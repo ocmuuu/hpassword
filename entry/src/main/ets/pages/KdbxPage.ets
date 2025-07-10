@@ -6,7 +6,7 @@ import pasteboard from '@ohos.pasteboard'
 import fs from '@ohos.file.fs'
 import DirtyFlag from '../utils/DirtyFlag'
 import { KdbxCore, KdbxCoreManager } from '../utils/KdbxCore'
-import { ProtectedValue } from '../lib'
+import { ProtectedValue, KdbxCredentials } from '../lib'
 
 // 密码库项目类型（配置项中的原始数据）
 interface DatabaseItem {
@@ -52,10 +52,15 @@ struct KdbxPage {
   private databaseFileManager: DatabaseFileManager | null = null
 
   // 查看/编辑状态
-  @State private isEditing: boolean = false // 预留编辑模式切换，目前默认只读
+  @State private isEditing: boolean = false // 编辑模式切换
   @State private hoverFieldKey: string | null = null // 悬停字段，用于显示复制按钮
   @State private showCopySuccessToast: boolean = false // 复制成功提示
   @State private successToastMessage: string = '复制成功'
+
+  // 编辑状态
+  @State private editingName: string = '' // 编辑中的密码库名称
+  @State private editingPassword: string = '' // 编辑中的主密码
+  @State private confirmEditingPassword: string = '' // 确认编辑中的主密码
 
   private copySuccessTimer: number | null = null
   private formErrorTimer: number | null = null
@@ -155,11 +160,9 @@ struct KdbxPage {
 
       // 优先从首选项读取密码库列表
       const listJson: string = PreferencesUtil.getKdbxDatabaseListSync();
-      console.log(`KdbxPage - 配置项中的原始密码库列表: ${listJson}`);
       let storedList: DatabaseItem[] = [];
       try {
         storedList = JSON.parse(listJson) as DatabaseItem[];
-        console.log(`KdbxPage - 解析后的密码库列表:`, storedList.map(item => `${item.name}(ID:${item.id})`).join(', '));
       } catch (e) {
         console.error('KdbxPage', '解析密码库列表失败:', e);
       }
@@ -168,38 +171,30 @@ struct KdbxPage {
       if (storedList && storedList.length > 0) {
         const existenceArr: boolean[] = await Promise.all(storedList.map(async (it: DatabaseItem, index: number) => {
           try {
-            console.log(`KdbxPage - 检查密码库文件 ${index}: ${it.name}, 路径: ${it.path}`);
             let exists = false;
             
             // 首先检查路径是否为空或无效
             if (!it.path || it.path.trim() === '') {
-              console.log(`KdbxPage - 路径为空，标记为不存在`);
               exists = false;
             } else if (it.path.includes('/')) {
               // 绝对路径，直接检查
               await fs.access(it.path);
               const stat = await fs.stat(it.path);
               exists = stat.size > 0;
-              console.log(`KdbxPage - 绝对路径检查结果: ${exists}, 大小: ${stat.size}`);
             } else if (this.databaseFileManager) {
               // 相对路径，通过 FileManager 检查
               exists = await this.databaseFileManager.fileExists(it.path);
-              console.log(`KdbxPage - 相对路径检查结果: ${exists}`);
             } else {
-              console.log(`KdbxPage - DatabaseFileManager 未初始化，跳过检查`);
               exists = false;
             }
             
             return exists;
           } catch(error) {
-            console.log(`KdbxPage - 检查文件存在性失败: ${error}`);
             return false;
           }
         }));
         
-        console.log(`KdbxPage - 存在性检查结果: ${existenceArr.join(', ')}`);
         validOriginalList = storedList.filter((_, idx) => existenceArr[idx]);
-        console.log(`KdbxPage - 过滤后的有效列表长度: ${validOriginalList.length}, 原始长度: ${storedList.length}`);
       }
 
       // 将原始数据转换为页面显示数据
@@ -278,12 +273,9 @@ struct KdbxPage {
   private onDatabaseItemClick(item: DisplayDatabaseItem) {
     const currentTime = Date.now()
     
-    console.log('KdbxPage', '点击事件触发，项目:', item.name, 'ID:', item.id)
-    
     // 检测双击
     if (this.lastClickedId === item.id && 
         currentTime - this.lastClickTime < this.DOUBLE_CLICK_INTERVAL) {
-      console.log('KdbxPage', '检测到双击')
       
       // 重置双击检测状态
       this.lastClickTime = 0
@@ -301,7 +293,6 @@ struct KdbxPage {
     setTimeout(() => {
       // 检查是否在延迟期间发生了双击
       if (this.lastClickedId === item.id) {
-        console.log('KdbxPage', '执行单击逻辑')
         this.selectedDatabaseId = item.id
         // 创建新的对象引用以确保 UI 更新
         this.selectedDatabase = {
@@ -331,12 +322,16 @@ struct KdbxPage {
           return;
         }
         
-        // 关闭当前已经打开的密码库实例
-        KdbxCoreManager.getInstance().clearCurrentKdbxCore();
-        console.log('KdbxPage', '已关闭当前密码库实例');
-              
-        // 设置双击的密码库为当前密码库
-        PreferencesUtil.saveKdbxCurrentDatabaseIdSync(item.id);
+        // 关闭并清除当前 KdbxCore 实例，下次将用新密码重新打开
+        const kdbxManager = KdbxCoreManager.getInstance();
+        const currentCore = kdbxManager.getCurrentKdbxCore();
+        if (currentCore) {
+        currentCore.close(); // 明确关闭数据库
+                  }
+          kdbxManager.clearCurrentKdbxCore(); // 清除实例引用
+                
+          // 设置双击的密码库为当前密码库
+          PreferencesUtil.saveKdbxCurrentDatabaseIdSync(item.id);
         
         // 显示切换成功提示
         this.switchSuccessMessage = `已切换到: ${item.name}`;
@@ -349,7 +344,6 @@ struct KdbxPage {
           await router.replaceUrl({
             url: 'pages/Index'
           });
-          console.log('KdbxPage', '成功跳转到Index页面');
         } catch (routerError) {
           console.error('KdbxPage', '跳转失败:', routerError);
           // 如果replaceUrl失败，尝试使用back
@@ -884,9 +878,9 @@ struct KdbxPage {
         // 编辑内容
         Scroll() {
           Column() {
-            // 基本信息
+            // 编辑密码库
             Column() {
-              Text('基本信息')
+              Text('编辑密码库')
                 .fontSize(18)
                 .fontWeight(FontWeight.Medium)
                 .fontColor('#000')
@@ -902,54 +896,88 @@ struct KdbxPage {
 
                 TextInput({ 
                   placeholder: '请输入密码库名称',
-                  text: this.selectedDatabase.name
+                  text: this.editingName
                 })
                   .fontSize(16)
                   .border({ width: 1, color: '#ddd' })
                   .borderRadius(4)
                   .padding(12)
+                  .maxLength(50)
+                  .onChange((value: string) => {
+                    this.editingName = value;
+                  })
               }
               .width('100%')
               .margin({ bottom: 16 })
               .alignItems(HorizontalAlign.Start)
 
-              // 密码库路径
+              // 新主密码（可选）
               Column() {
-                Text('密码库路径')
+                Text('新主密码（可选）')
                   .fontSize(16)
                   .fontColor('#333')
                   .fontWeight(FontWeight.Medium)
                   .margin({ bottom: 8 })
 
                 TextInput({ 
-                  placeholder: '请输入密码库路径',
-                  text: this.selectedDatabase.path
+                  placeholder: '如需修改主密码，请输入新密码（至少8位）',
+                  text: this.editingPassword
                 })
+                  .type(InputType.Password)
                   .fontSize(16)
                   .border({ width: 1, color: '#ddd' })
                   .borderRadius(4)
                   .padding(12)
+                  .onChange((value: string) => {
+                    this.editingPassword = value;
+                  })
               }
               .width('100%')
               .margin({ bottom: 16 })
               .alignItems(HorizontalAlign.Start)
 
-              // 描述
+              // 确认主密码
               Column() {
-                Text('描述')
+                Text('确认主密码')
                   .fontSize(16)
                   .fontColor('#333')
                   .fontWeight(FontWeight.Medium)
                   .margin({ bottom: 8 })
 
-                TextArea({ 
-                  placeholder: '请输入密码库描述'
+                TextInput({ 
+                  placeholder: '再次输入新主密码',
+                  text: this.confirmEditingPassword
                 })
+                  .type(InputType.Password)
                   .fontSize(16)
                   .border({ width: 1, color: '#ddd' })
                   .borderRadius(4)
                   .padding(12)
-                  .height(80)
+                  .enabled(this.editingPassword.trim() !== '')
+                  .opacity(this.editingPassword.trim() !== '' ? 1 : 0.5)
+                  .onChange((value: string) => {
+                    this.confirmEditingPassword = value;
+                  })
+              }
+              .width('100%')
+              .margin({ bottom: 16 })
+              .alignItems(HorizontalAlign.Start)
+
+              // 说明文字
+              Column() {
+                Text('说明')
+                  .fontSize(16)
+                  .fontColor('#333')
+                  .fontWeight(FontWeight.Medium)
+                  .margin({ bottom: 8 })
+
+                Text('• 只有当前打开的密码库可以编辑\n• 如果不需要修改主密码，请保持密码字段为空\n• 修改主密码后需要重新打开密码库')
+                  .fontSize(14)
+                  .fontColor('#666')
+                  .lineHeight(20)
+                  .padding(12)
+                  .backgroundColor('#f9f9f9')
+                  .borderRadius(4)
               }
               .width('100%')
               .margin({ bottom: 16 })
@@ -963,20 +991,24 @@ struct KdbxPage {
             Row() {
               Button('保存')
                 .fontSize(14)
-                .backgroundColor('#6FA8FF')
+                .backgroundColor('#4CAF50')
                 .fontColor('#fff')
                 .padding({ left: 16, right: 16, top: 8, bottom: 8 })
                 .borderRadius(4)
-                .border({ width: 1, color: '#000' })
                 .margin({ right: 8 })
+                .onClick(() => {
+                  this.saveEditChanges();
+                })
 
-              Button('重置')
+              Button('取消')
                 .fontSize(14)
                 .backgroundColor('#f0f0f0')
                 .fontColor('#666')
                 .padding({ left: 16, right: 16, top: 8, bottom: 8 })
                 .borderRadius(4)
-                .border({ width: 1, color: '#000' })
+                .onClick(() => {
+                  this.cancelEditMode();
+                })
             }
             .width('100%')
             .padding({ left: 20, right: 20, top: 16, bottom: 16 })
@@ -1082,9 +1114,7 @@ struct KdbxPage {
           return;
         }
         
-        console.log('KdbxPage', '文件不存在，可以创建:', finalPath);
       } catch (error) {
-        console.log('KdbxPage', '检查文件存在性时发生错误:', error);
         // 如果检查失败，为了安全起见，继续创建流程
       }
 
@@ -1143,7 +1173,6 @@ struct KdbxPage {
       
       // 追加新密码库到配置项列表
       currentOriginalList.push(newOriginalItem);
-      console.log(`KdbxPage - 保存新的密码库列表:`, currentOriginalList.map(item => `${item.name}(ID:${item.id})`).join(', '));
       PreferencesUtil.saveKdbxDatabaseListSync(JSON.stringify(currentOriginalList));
 
       // 转换为显示项目并更新页面显示列表  
@@ -1318,6 +1347,287 @@ struct KdbxPage {
   private isValidKdbxFileName(fileName: string): boolean {
     const pattern: RegExp = /^[A-Za-z0-9_]+\.kdbx$/;
     return pattern.test(fileName);
+  }
+
+  /**
+   * 检查当前选中的密码库是否可以编辑（是否为当前打开的密码库）
+   */
+  private canEditSelectedDatabase(): boolean {
+    if (!this.selectedDatabase) {
+      return false;
+    }
+    
+    const currentId = PreferencesUtil.getKdbxCurrentDatabaseIdSync();
+    return this.selectedDatabase.id === currentId;
+  }
+
+  /**
+   * 进入编辑模式
+   */
+  private enterEditMode() {
+    if (!this.selectedDatabase) {
+      return;
+    }
+    
+    this.isEditing = true;
+    this.editingName = this.selectedDatabase.name;
+    this.editingPassword = '';
+    this.confirmEditingPassword = '';
+    
+    // 清除错误提示
+    if (this.formErrorTimer !== null) {
+      clearTimeout(this.formErrorTimer);
+      this.formErrorTimer = null;
+    }
+    this.formError = '';
+  }
+
+  /**
+   * 取消编辑模式
+   */
+  private cancelEditMode() {
+    this.isEditing = false;
+    this.editingName = '';
+    this.editingPassword = '';
+    this.confirmEditingPassword = '';
+    
+    // 清除错误提示
+    if (this.formErrorTimer !== null) {
+      clearTimeout(this.formErrorTimer);
+      this.formErrorTimer = null;
+    }
+    this.formError = '';
+  }
+
+  /**
+   * 保存编辑内容
+   */
+  private async saveEditChanges() {
+    if (!this.selectedDatabase) {
+      return;
+    }
+
+    // 验证输入
+    if (!this.editingName.trim()) {
+      this.showFormError('密码库名称不能为空');
+      return;
+    }
+
+    if (this.editingName.trim().length > 50) {
+      this.showFormError('密码库名称不能超过50个字符');
+      return;
+    }
+
+    // 如果设置了新密码，验证密码
+    const hasNewPassword = this.editingPassword.trim() !== '';
+    if (hasNewPassword) {
+      if (this.editingPassword.length < 8) {
+        this.showFormError('主密码至少8位');
+        return;
+      }
+
+      if (this.editingPassword !== this.confirmEditingPassword) {
+        this.showFormError('两次密码不一致');
+        return;
+      }
+    }
+
+    try {
+      // 获取当前密码库的原始数据
+      const currentOriginalList: DatabaseItem[] = [];
+      try {
+        const listJson = PreferencesUtil.getKdbxDatabaseListSync();
+        currentOriginalList.push(...JSON.parse(listJson) as DatabaseItem[]);
+      } catch (e) {
+        this.showFormError('获取密码库列表失败');
+        return;
+      }
+
+      const currentItem = currentOriginalList.find(item => item.id === this.selectedDatabase!.id);
+      if (!currentItem) {
+        this.showFormError('找不到对应的密码库记录');
+        return;
+      }
+
+      // 准备新的密码库名称
+      const newName = this.editingName.trim();
+
+      // 如果需要修改主密码，重新保存数据库文件
+      if (hasNewPassword) {
+        // 获取当前已经打开的密码库实例
+        const currentKdbxCore = KdbxCoreManager.getInstance().getCurrentKdbxCore();
+        if (!currentKdbxCore) {
+          this.showFormError('当前没有打开的密码库实例');
+          return;
+        }
+
+        const currentDb = currentKdbxCore.getDatabase();
+        if (!currentDb) {
+          this.showFormError('无法获取当前密码库数据');
+          return;
+        }
+
+        // 使用新密码创建新的凭据并保存
+        if (!this.databaseFileManager) {
+          this.showFormError('文件管理器未初始化');
+          return;
+        }
+
+        try {
+          // 创建新的凭据
+          const newCredentials = new KdbxCredentials(ProtectedValue.fromString(this.editingPassword));
+          
+          // 等待凭据准备完成
+          await newCredentials.ready;
+          
+          // 修改数据库的凭据
+          currentDb.credentials = newCredentials;
+          
+          // 同时更新密码库内部的名称信息（如果有修改）
+          if (currentDb.meta && currentDb.meta.name !== newName) {
+            currentDb.meta.name = newName;
+          }
+          
+          // 保存数据库到文件
+          const fileSaveResult = await this.databaseFileManager.saveDatabaseToFile(
+            currentDb,
+            currentItem.path,
+            true
+          );
+
+          if (!fileSaveResult.success) {
+            this.showFormError('保存密码库文件失败');
+            return;
+          }
+
+          // 关闭并清除当前 KdbxCore 实例，下次将用新密码重新打开
+          const kdbxManager = KdbxCoreManager.getInstance();
+          const currentCore = kdbxManager.getCurrentKdbxCore();
+          if (currentCore) {
+            currentCore.close(); // 明确关闭数据库
+          }
+          kdbxManager.clearCurrentKdbxCore(); // 清除实例引用
+          
+        } catch (error) {
+          console.error('KdbxPage', '修改主密码失败:', error);
+          this.showFormError('修改主密码失败');
+          return;
+        }
+        
+        // 修改密码成功后，更新配置项并跳转到 Index 页面
+        // 不更新UI，因为马上就要跳转重新打开了
+        currentItem.name = newName;
+        PreferencesUtil.saveKdbxDatabaseListSync(JSON.stringify(currentOriginalList));
+        
+        // 显示成功提示并跳转
+        this.successToastMessage = '密码库名称和主密码已更新，正在跳转...';
+        this.showCopySuccessToast = true;
+        
+        // 2秒后跳转到Index页面
+        setTimeout(async () => {
+          this.showCopySuccessToast = false;
+          try {
+            await router.replaceUrl({
+              url: 'pages/Index'
+            });
+          } catch (routerError) {
+            console.error('KdbxPage', '跳转失败:', routerError);
+            // 如果replaceUrl失败，尝试使用back
+            await router.back();
+          }
+        }, 2000);
+        
+        return; // 提前返回，不执行后续的普通保存逻辑
+      }
+
+      // 以下是仅修改名称时的逻辑
+      // 更新密码库名称
+      currentItem.name = newName;
+      
+      // 同时更新密码库文件内部的名称信息
+      const currentKdbxCore = KdbxCoreManager.getInstance().getCurrentKdbxCore();
+      let needSaveDatabaseForNameChange = false;
+      
+      if (currentKdbxCore) {
+        const currentDb = currentKdbxCore.getDatabase();
+        if (currentDb && currentDb.meta) {
+          // 检查内部名称是否需要更新
+          if (currentDb.meta.name !== newName) {
+            currentDb.meta.name = newName;
+            needSaveDatabaseForNameChange = true;
+          }
+        }
+      }
+      
+      // 如果修改了内部名称，需要保存数据库文件
+      if (needSaveDatabaseForNameChange) {
+        if (this.databaseFileManager && currentKdbxCore) {
+          const currentDb = currentKdbxCore.getDatabase();
+          if (currentDb) {
+            try {
+              const nameUpdateResult = await this.databaseFileManager.saveDatabaseToFile(
+                currentDb,
+                currentItem.path,
+                true
+              );
+              
+              if (!nameUpdateResult.success) {
+                console.warn('KdbxPage', '更新密码库内部名称失败:', nameUpdateResult.error);
+                // 不阻止整个保存流程，只是记录警告
+              }
+            } catch (error) {
+              console.warn('KdbxPage', '保存密码库内部名称时发生异常:', error);
+              // 不阻止整个保存流程，只是记录警告
+            }
+          }
+        }
+      }
+      
+      // 更新配置项
+      PreferencesUtil.saveKdbxDatabaseListSync(JSON.stringify(currentOriginalList));
+
+      // 仅修改名称时：更新页面显示数据，刷新第一栏密码库列表UI
+      const updatedDisplayItem = this.convertToDisplayItem(currentItem);
+      const index = this.databaseItems.findIndex(item => item.id === this.selectedDatabase!.id);
+      if (index !== -1) {
+        // 创建新的 DisplayDatabaseItem 数组以触发ArkUI响应式更新
+        const newDatabaseItems = [...this.databaseItems];
+        newDatabaseItems[index] = updatedDisplayItem;
+        this.databaseItems = newDatabaseItems;
+      }
+
+      // 更新选中的数据库对象
+      this.selectedDatabase = {
+        id: updatedDisplayItem.id,
+        name: updatedDisplayItem.name,
+        path: updatedDisplayItem.path,
+        lastModified: updatedDisplayItem.lastModified,
+        size: updatedDisplayItem.size,
+        displayDir: updatedDisplayItem.displayDir,
+        displayFileName: updatedDisplayItem.displayFileName,
+        displaySize: updatedDisplayItem.displaySize
+      };
+
+      // 退出编辑模式
+      this.cancelEditMode();
+
+      // 显示成功提示（此时只可能是名称修改，密码修改已在前面处理并跳转）
+      this.successToastMessage = '密码库名称已更新';
+      this.showCopySuccessToast = true;
+      
+      // 2.5秒后隐藏成功提示
+      if (this.copySuccessTimer !== null) {
+        clearTimeout(this.copySuccessTimer);
+      }
+      this.copySuccessTimer = setTimeout(() => {
+        this.showCopySuccessToast = false;
+        this.copySuccessTimer = null;
+      }, 2500);
+
+    } catch (error) {
+      console.error('KdbxPage', '保存编辑内容失败:', error);
+      this.showFormError('保存时发生异常');
+    }
   }
 
   build() {
@@ -1528,7 +1838,9 @@ struct KdbxPage {
         Column() {
           // 编辑面板顶部工具栏
           Row() {
-            Text(this.isAddingDatabase ? '创建密码库' : (this.selectedDatabase ? this.selectedDatabase.name : '未选择密码库'))
+            Text(this.isAddingDatabase ? '创建密码库' : 
+                 (this.isEditing ? `编辑密码库: ${this.editingName || this.selectedDatabase?.name || ''}` : 
+                  (this.selectedDatabase ? this.selectedDatabase.name : '未选择密码库')))
                .fontSize(18)
                .fontWeight(FontWeight.Medium)
                .fontColor('#000')
@@ -1536,21 +1848,19 @@ struct KdbxPage {
                .maxLines(1)
                .textOverflow({ overflow: TextOverflow.Ellipsis })
 
-            if (!this.isAddingDatabase) {
+            if (!this.isAddingDatabase && this.canEditSelectedDatabase()) {
               Button() {
                 Image($r('app.media.edit'))
                   .width(20)
                   .height(20)
-                  .fillColor(this.selectedDatabase ? '#007AFF' : '#CCCCCC')
+                  .fillColor('#007AFF')
               }
               .backgroundColor('transparent')
               .padding(4)
               .stateEffect(false)
-              .opacity(this.selectedDatabase ? 1 : 0.4)
               .onClick(() => {
                 if (this.selectedDatabase) {
-                  // TODO: 进入编辑模式或弹出编辑对话框
-                  console.log('KdbxPage', '编辑密码库', this.selectedDatabase.name)
+                  this.enterEditMode();
                 }
               })
             }
@@ -1562,10 +1872,12 @@ struct KdbxPage {
           .backgroundColor('#f8f9fa')
           .border({ width: { bottom: 1 }, color: '#e0e0e0' })
 
-          // 内容区域：默认查看信息
+          // 内容区域：根据状态切换显示
           Column() {
             if (this.isAddingDatabase) {
               this.CreateDatabaseFormView()
+            } else if (this.isEditing) {
+              this.EditPanelView()
             } else {
               this.InfoPanelView()
             }
@@ -1573,7 +1885,7 @@ struct KdbxPage {
           .layoutWeight(1)
           .width('100%')
           .backgroundColor('#fff')
-          .key(`info_panel_${this.selectedDatabase?.id || 'none'}`)
+          .key(`content_panel_${this.selectedDatabase?.id || 'none'}_${this.isEditing ? 'edit' : 'view'}`)
 
           // 复制成功提示（第二栏底部）
           if (this.formError) {
