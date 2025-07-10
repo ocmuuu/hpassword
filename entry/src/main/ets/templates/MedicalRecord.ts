@@ -11,6 +11,8 @@ export const MedicalRecordTemplate: CategoryTemplate = {
     { key: 'PatientID', label: '患者ID' },
     { key: 'Diagnosis', label: '诊断结果' },
     { key: 'Treatment', label: '治疗方案' },
+    { key: 'Allergies', label: '过敏史' },
+    { key: 'Medication', label: '药物过敏' },
     { key: 'Notes', label: '备注' }
   ],
   samples: [
@@ -21,7 +23,9 @@ export const MedicalRecordTemplate: CategoryTemplate = {
       Doctor: '王主任',
       PatientID: 'P20240220001',
       Diagnosis: '健康状态良好',
-      Treatment: '建议定期复查'
+      Treatment: '建议定期复查',
+      Allergies: '无',
+      Medication: '青霉素'
     }
   ]
 }; 

@@ -18,6 +18,27 @@ export const UtilityAccountTemplate: CategoryTemplate = {
       Region: '北京市',
       Address: '朝阳区示例路 1 号',
       Phone: '96777'
+    },
+    {
+      Title: '北京水务',
+      AccountNumber: 'BJ-1234567',
+      Region: '北京市',
+      Address: '朝阳区示例路 1 号',
+      Phone: '96777'
+    },
+    {
+      Title: '国家电网',
+      AccountNumber: 'BJ-1234567',
+      Region: '北京市',
+      Address: '朝阳区示例路 1 号',
+      Phone: '96777'
+    },
+    {
+      Title: '中国移动',
+      AccountNumber: 'BJ-1234567',
+      Region: '北京市',
+      Address: '朝阳区示例路 1 号',
+      Phone: '96777'
     }
   ]
 }; 

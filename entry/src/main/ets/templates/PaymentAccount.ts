@@ -17,7 +17,7 @@ export const PaymentAccountTemplate: CategoryTemplate = {
       Title: '支付宝',
       UserName: '138****8888',
       Password: 'AliLogin2024',
-      PayPassword: '******',
+      PayPassword: '080808',
       RealName: '张三',
       Phone: '13800138888',
       Notes: '已绑定 U 盾'

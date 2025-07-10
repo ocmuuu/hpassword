@@ -102,6 +102,10 @@ export class FieldInfoHelper {
       'BranchCode': '分行代码',
       'PayPassword': '支付密码',
       'ClaimPhone': '理赔电话',
+      'Holder': '持卡人',
+      'HolderName': '持卡人姓名',
+      'PolicyHolder': '投保人',
+
       
       // 证件相关
       'Number': '证件号码',
@@ -111,10 +115,12 @@ export class FieldInfoHelper {
       // 医疗相关
       'Hospital': '医院',
       'Doctor': '医生',
-      'PatientID': '患者ID',
+      'PatientID': '就诊ID',
       'Diagnosis': '诊断结果',
       'Treatment': '治疗方案',
       'Date': '日期',
+      'Allergies': '过敏史',
+      'Medication': '药物过敏',
       
       // 车辆相关
       'Brand': '品牌',
@@ -125,10 +131,14 @@ export class FieldInfoHelper {
       'PurchaseDate': '购买日期',
       'Insurance': '保险到期',
       'MaintenanceDate': '下次保养日期',
+      'EngineNumber': '发动机号',
+      'RegistrationDate': '注册日期',
+      'InspectionDate': '年检日期',
       
       // 技术相关
       'Host': '主机',
       'Port': '端口',
+      'OS': '操作系统',
       'Protocol': '协议',
       'Server': '服务器',
       'Database': '数据库',
@@ -138,12 +148,36 @@ export class FieldInfoHelper {
       'PublicKey': '公钥',
       'Certificate': '证书',
       'License': '许可证',
+      'RecoveryKey': '恢复密钥',
       'Key': 'API Key',
       'Secret': 'API Secret',
       'BaseURL': '基础URL',
       'Documentation': '文档链接',
       'RateLimit': '速率限制',
       'DBname':'数据库名',
+      'TOTP': '动态验证码',
+      'SSID': 'WiFi名称',
+      'AdminURL': '管理员URL',
+      'WifiPassword': 'WiFi密码',
+      'AccessToken': '访问令牌',
+      'RefreshToken': '刷新令牌',
+      'ClientID': '客户端ID',
+      'ClientSecret': '客户端密钥',
+      'ClientKey': '客户端密钥',
+      'ClientToken': '客户端令牌',
+      'ClientRefreshToken': '客户端刷新令牌',
+      'ClientAccessToken': '客户端访问令牌',
+      'ClientSecretKey': '客户端密钥',
+      'ClientPrivateKey': '客户端私钥',
+      'ClientPublicKey': '客户端公钥',
+      'ClientCertificate': '客户端证书',
+      'ClientLicense': '客户端许可证',
+      'APIKey': 'API密钥',
+      'APISecret': 'API密钥',
+      'APISecretKey': 'API密钥',
+      'Algorithm': '算法',
+      'Scope': '范围',
+      
       
       // 软件相关
       'LicenseKey': '许可证密钥',
@@ -151,12 +185,14 @@ export class FieldInfoHelper {
       'MaxDevices': '最大设备数',
       
       // 加密货币相关
+      'WalletPassword': '钱包密码',
       'Seed': '助记词',
       'Network': '网络/链',
       'Balance': '余额',
       'CreationDate': '创建日期',
       
       // 其他常见字段
+      'Barcode': '条码',
       'Website': '网站',
       'Description': '描述',
       'Comment': '注释',
@@ -165,6 +201,10 @@ export class FieldInfoHelper {
       'Status': '状态',
       'Version': '版本',
       'Location': '位置',
+      'Department': '部门',
+      'FundPassword': '资金密码',
+      'SerialNumber': '序列号',
+      'ActivationCode': '激活码',
       'Region': '所在地区',
       'Level': '等级',
       'Plan': '套餐',

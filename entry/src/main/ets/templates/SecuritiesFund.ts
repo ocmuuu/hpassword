@@ -15,7 +15,7 @@ export const SecuritiesFundTemplate: CategoryTemplate = {
       Title: '华泰证券',
       AccountNumber: '8A00123456',
       Password: 'Trade#521',
-      FundPassword: '888888',
+      FundPassword: '080808',
       Notes: '手机 OTP'
     }
   ]

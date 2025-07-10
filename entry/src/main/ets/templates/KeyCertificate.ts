@@ -6,6 +6,7 @@ export const KeyCertificateTemplate: CategoryTemplate = {
   fields: [
     { key: 'Title', label: '证书名称' },
     { key: 'Type', label: '类型' },
+    { key: 'Algorithm', label: '算法' },
     { key: 'PrivateKey', label: '私钥', protected: true },
     { key: 'PublicKey', label: '公钥' },
     { key: 'Passphrase', label: '口令', protected: true },
@@ -15,7 +16,8 @@ export const KeyCertificateTemplate: CategoryTemplate = {
   samples: [
     {
       Title: 'Github SSH',
-      Type: 'ED25519',
+      Type: 'SSH',
+      Algorithm: 'ED25519',
       PrivateKey: '-----BEGIN OPENSSH PRIVATE KEY-----...',
       PublicKey: 'ssh-ed25519 AAAA...',
       Notes: '无口令'

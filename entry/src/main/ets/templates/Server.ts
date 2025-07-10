@@ -7,6 +7,7 @@ export const ServerTemplate: CategoryTemplate = {
     { key: 'Title', label: '主机名' },
     { key: 'Host', label: 'IP / 域名' },
     { key: 'Port', label: '端口' },
+    { key: 'OS', label: '操作系统' },
     { key: 'UserName', label: '用户名' },
     { key: 'Password', label: '密码', protected: true },
     { key: 'Protocol', label: '协议(SSH/RDP)' },
@@ -17,6 +18,7 @@ export const ServerTemplate: CategoryTemplate = {
       Title: '阿里云香港',
       Host: '47.88.xx.xx',
       Port: '22',
+      OS: 'Ubuntu 22.04',
       UserName: 'root',
       Password: 'AliCloud@2024',
       Protocol: 'SSH'

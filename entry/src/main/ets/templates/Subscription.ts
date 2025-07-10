@@ -15,7 +15,7 @@ export const SubscriptionTemplate: CategoryTemplate = {
     {
       Title: '阿里云盘',
       UserName: 'bob@example.com',
-      Password: 'Netfl!x2024',
+      Password: 'Alifl!x2024',
       RenewDate: '2024-08-01',
       Plan: 'Premium',
       Notes: '自动扣信用卡'

@@ -44,11 +44,11 @@ export default class PreferencesUtil {
   }
 
   static getKdbxFirstColumnWidthSync(): number {
-    return PreferencesUtil.dataPreferences?.getSync('kdbx_first_column_width', 250) as number ?? 250;
+    return PreferencesUtil.dataPreferences?.getSync('kdbx_first_column_width', 200) as number ?? 200;
   }
 
   static getKdbxSecondColumnWidthSync(): number {
-    return PreferencesUtil.dataPreferences?.getSync('kdbx_second_column_width', 350) as number ?? 350;
+    return PreferencesUtil.dataPreferences?.getSync('kdbx_second_column_width', 250) as number ?? 250;
   }
   // endregion
 

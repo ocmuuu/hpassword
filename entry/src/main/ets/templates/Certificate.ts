@@ -5,6 +5,7 @@ export const CertificateTemplate: CategoryTemplate = {
   desc: '身份证、护照、职业资格证等官方证件的编号、发证机关及有效期信息',
   fields: [
     { key: 'Title', label: '证件名称' },
+    { key: 'HolderName', label: '持有人姓名' },
     { key: 'Number', label: '证件号码' },
     { key: 'Type', label: '证件类型' },
     { key: 'IssueDate', label: '签发日期' },
@@ -15,7 +16,8 @@ export const CertificateTemplate: CategoryTemplate = {
   ],
   samples: [
     {
-      Title: '中华人民共和国居民身份证',
+      Title: '张三的身份证',
+      HolderName: '张三',
       Number: '110101199001011234',
       Type: '身份证',
       IssueDate: '2015-05-20',

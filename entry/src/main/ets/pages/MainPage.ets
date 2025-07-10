@@ -35,6 +35,7 @@ struct MainPage {
   @State private databaseFileManager: DatabaseFileManager | null = null
   
   // 数据状态
+  @State private databaseName: string = '密码库'  // 数据库名称
   @State private sidebarItems: SidebarItem[] = []
   @State private fixedSidebarItems: SidebarItem[] = []  // 固定在上方的项目
   @State private scrollableSidebarItems: SidebarItem[] = []  // 可滚动的项目
@@ -118,6 +119,11 @@ struct MainPage {
           this.kdbxQuery = new KdbxQuery(db)
           this.kdbxEntryManager = new KdbxEntryManager(db)
           this.kdbxGroupManager = new KdbxGroupManager(db)
+          
+          // 获取数据库名称
+          if (db.meta && db.meta.name) {
+            this.databaseName = db.meta.name
+          }
           
           // 初始化文件管理器
           const context = getContext(this) as Context
@@ -1773,11 +1779,19 @@ struct MainPage {
           Column() {
             // 侧边栏标题
             Row() {
-              Text('密码库')
+              Image($r('app.media.right_arrow'))
+                .width(16)
+                .height(16)
+                .fillColor('#666')
+                .margin({ right: 8 })
+              
+              Text(this.databaseName)
                 .fontSize(18)
                 .fontWeight(FontWeight.Medium)
                 .fontColor('#000')
                 .layoutWeight(1)
+                .maxLines(1)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
 
               Image($r('app.media.lock'))
                 .width(20)
@@ -2005,8 +2019,8 @@ struct MainPage {
                     // 分割线
                     if (entry.id !== this.getCurrentDisplayEntries()[this.getCurrentDisplayEntries().length - 1]?.id) {
                       Divider()
-                        .strokeWidth(0.5)
-                        .color('#f0f0f0')
+                        .strokeWidth(0.8)
+                        .color('#e0e0e0')
                         .margin({ left: 16, right: 0 })
                     }
                   }

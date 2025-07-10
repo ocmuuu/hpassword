@@ -27,6 +27,7 @@ struct Index {
   @State private passwordFocused: boolean = false
   @State private openBtnError: boolean = false // 按钮错误状态
   @State private openBtnErrorText: string = '' // 错误文本
+  @State private capsLockOn: boolean = false // 大写锁定状态
   
   private defaultDatabase: DefaultDatabase | null = null;
 
@@ -188,6 +189,7 @@ struct Index {
       KdbxCoreManager.getInstance().clearCurrentKdbxCore();
       this.password = '';
       this.confirmPassword = '';
+      this.capsLockOn = false; // 清除大写锁定状态
       this.databaseExists = true;
       
     } catch (error) {
@@ -229,6 +231,9 @@ struct Index {
           // 在按钮上显示 "密码错误" 2 秒
           this.openBtnError = true;
           this.openBtnErrorText = '密码错误';
+          // 直接清空密码，用户可以重新输入
+          this.password = '';
+          this.capsLockOn = false; // 清除大写锁定状态
           setTimeout(() => {
             this.openBtnError = false;
             this.openBtnErrorText = '';
@@ -289,6 +294,28 @@ struct Index {
    */
   clearError() {
     this.errorMessage = '';
+  }
+
+  /**
+   * 检测大写锁定状态（通过输入文本判断）
+   */
+  private checkCapsLockByText(text: string): void {
+    // 简单的启发式检测：如果连续输入多个大写字母，可能是大写锁定开启
+    if (text.length >= 2) {
+      const lastTwoChars = text.slice(-2);
+      const isAllUppercase = lastTwoChars === lastTwoChars.toUpperCase() && 
+                           lastTwoChars !== lastTwoChars.toLowerCase() &&
+                           /[A-Z]/.test(lastTwoChars);
+      
+      if (isAllUppercase) {
+        this.capsLockOn = true;
+      } else if (/[a-z]/.test(lastTwoChars)) {
+        this.capsLockOn = false;
+      }
+    } else if (text.length === 0) {
+      // 如果密码为空，清除大写锁定状态
+      this.capsLockOn = false;
+    }
   }
 
   build() {
@@ -366,7 +393,7 @@ struct Index {
         .margin({ bottom: 30 })
       
       // 密码输入框
-      TextInput({ placeholder: '请输入主密码' })
+      TextInput({ placeholder: '请输入主密码', text: this.password })
         .defaultFocus(this.passwordFocused)
         .type(InputType.Password)
         .width('100%')
@@ -378,11 +405,24 @@ struct Index {
         .onChange((value: string) => {
           this.password = value;
           this.clearError();
+          this.checkCapsLockByText(value);
         })
         .onSubmit(() => {
           this.openDefaultDatabase();
         })
-        .margin({ bottom: 30 })
+        .margin({ bottom: 10 })
+      
+      // 大写锁定提示
+      Row() {
+        Text('⚠️ 大写锁定已开启')
+          .fontSize(14)
+          .fontColor('#FF9800')
+          .opacity(this.capsLockOn ? 1 : 0)
+      }
+      .width('100%')
+      .height(20)
+      .justifyContent(FlexAlign.Start)
+      .margin({ bottom: 10 })
       
       // 打开按钮
       Button(this.openBtnError ? this.openBtnErrorText : '打开密码库')
@@ -461,8 +501,21 @@ struct Index {
         .onChange((value: string) => {
           this.password = value;
           this.clearError();
+          this.checkCapsLockByText(value);
         })
-        .margin({ bottom: 20 })
+        .margin({ bottom: 10 })
+      
+      // 大写锁定提示
+      Row() {
+        Text('⚠️ 大写锁定已开启')
+          .fontSize(14)
+          .fontColor('#FF9800')
+          .opacity(this.capsLockOn ? 1 : 0)
+      }
+      .width('100%')
+      .height(20)
+      .justifyContent(FlexAlign.Start)
+      .margin({ bottom: 10 })
       
       // 确认密码输入框
       TextInput({ placeholder: '请再次输入主密码' })
@@ -476,6 +529,7 @@ struct Index {
         .onChange((value: string) => {
           this.confirmPassword = value;
           this.clearError();
+          this.checkCapsLockByText(value);
         })
         .onSubmit(() => {
           this.createDefaultDatabase();
@@ -495,6 +549,7 @@ struct Index {
         .onClick(() => {
           this.createDefaultDatabase();
         })
+        .margin({ top: 10 })
       
       // 创建进度与测试结果占位（总高度约60px）
       Column() {

@@ -8,11 +8,14 @@ export const VehicleInfoTemplate: CategoryTemplate = {
     { key: 'Brand', label: '品牌' },
     { key: 'Model', label: '型号' },
     { key: 'VIN', label: 'VIN' },
+    { key: 'EngineNumber', label: '发动机号' },
     { key: 'Plate', label: '车牌号' },
     { key: 'Color', label: '颜色' },
     { key: 'PurchaseDate', label: '购买日期' },
+    { key: 'RegistrationDate', label: '注册日期' },
     { key: 'Insurance', label: '保险到期' },
     { key: 'MaintenanceDate', label: '下次保养日期' },
+    { key: 'InspectionDate', label: '年检日期' },
     { key: 'Notes', label: '备注' }
   ],
   samples: [
@@ -21,11 +24,14 @@ export const VehicleInfoTemplate: CategoryTemplate = {
       Brand: '特斯拉',
       Model: 'Model 3',
       VIN: 'LRW3E7EK1NC111111',
+      EngineNumber: 'EM12345678',
       Plate: '京A·12345',
       Color: '珍珠白',
       PurchaseDate: '2023-06-15',
+      RegistrationDate: '2023-06-20',
       Insurance: '2025-04-06',
-      MaintenanceDate: '2024-08-15'
+      MaintenanceDate: '2024-08-15',
+      InspectionDate: '2025-01-15'
     }
   ]
 }; 

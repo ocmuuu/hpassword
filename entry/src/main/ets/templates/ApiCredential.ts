@@ -10,6 +10,7 @@ export const ApiCredentialTemplate: CategoryTemplate = {
     { key: 'BaseURL', label: '基础URL' },
     { key: 'Documentation', label: '文档链接' },
     { key: 'RateLimit', label: '速率限制' },
+    { key: 'Scope', label: '权限范围' },
     { key: 'Notes', label: '备注' }
   ],
   samples: [
@@ -20,6 +21,7 @@ export const ApiCredentialTemplate: CategoryTemplate = {
       BaseURL: 'https://api.openai.com/v1',
       Documentation: 'https://platform.openai.com/docs',
       RateLimit: '3 RPM',
+      Scope: 'read-only',
       Notes: '账户邮箱: me@example.com'
     }
   ]

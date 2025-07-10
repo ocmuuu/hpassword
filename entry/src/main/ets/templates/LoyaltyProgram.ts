@@ -8,6 +8,7 @@ export const LoyaltyProgramTemplate: CategoryTemplate = {
     { key: 'MemberID', label: '会员号' },
     { key: 'Password', label: '登录密码', protected: true },
     { key: 'Points', label: '当前积分' },
+    { key: 'Expiry', label: '积分有效期' },
     { key: 'Notes', label: '备注' }
   ],
   samples: [
@@ -15,7 +16,8 @@ export const LoyaltyProgramTemplate: CategoryTemplate = {
       Title: '万豪礼赏',
       MemberID: '88888888',
       Password: 'Marriott2024',
-      Points: '12000'
+      Points: '12000',
+      Expiry: '2025-12-31' 
     }
   ]
 }; 
