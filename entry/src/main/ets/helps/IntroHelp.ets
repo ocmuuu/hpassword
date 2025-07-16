@@ -6,6 +6,13 @@ export const helpItem: HelpItemModel = new HelpItemModel(
   $r('app.media.information'),
   `hPassword 是一款专业的 HarmonyOS 密码管理软件，为用户提供安全、便捷的密码管理解决方案。
 
+**问题反馈**
+• 邮箱：service@mznm.com
+• 邮箱：ocmuuu@qq.com
+• QQ：360264515
+• QQ群：95700749
+• 微信：ocmuuu
+
 **产品定位**
 • 开源项目：完全开源，代码透明，接受社区审计
 • 专业级：采用银行级加密技术，确保数据安全

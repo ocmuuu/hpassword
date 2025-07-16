@@ -518,6 +518,17 @@ struct Index {
   }
 
   /**
+   * 清空密码输入框
+   */
+  clearPasswords() {
+    this.password = '';
+    this.confirmPassword = '';
+    this.capsLockOn = false; // 清除大写锁定状态
+    this.errorMessage = ''; // 同时清除错误信息
+    hilog.info(0, TAG, '密码输入框已通过右键菜单清空');
+  }
+
+  /**
    * 检测大写锁定状态（通过输入文本判断）
    */
   private checkCapsLockByText(text: string): void {
@@ -666,10 +677,10 @@ struct Index {
       Button(this.openBtnError ? this.openBtnErrorText : '打开密码库')
         .width('100%')
         .height(50)
-        .fontSize(16)
+        .fontSize(17)
         .fontWeight(FontWeight.Medium)
         .backgroundColor(this.openBtnError ? '#F44336' : '#1976D2')
-        .borderRadius(8)
+        .borderRadius(1)
         .enabled(!this.isOpening)
         .onClick(() => {
           this.openCurrentDatabase();
@@ -778,10 +789,10 @@ struct Index {
       Button('创建密码库')
         .width('100%')
         .height(50)
-        .fontSize(16)
+        .fontSize(17)
         .fontWeight(FontWeight.Medium)
-        .backgroundColor('#4CAF50')
-        .borderRadius(8)
+        .backgroundColor('#1976D2')
+        .borderRadius(1)
         .enabled(!this.isCreating)
         .onClick(() => {
           this.createDefaultDatabase();

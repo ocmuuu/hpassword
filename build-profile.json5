@@ -1,6 +1,20 @@
 {
   "app": {
-    "signingConfigs": [],
+    "signingConfigs": [
+      {
+        "name": "default",
+        "type": "HarmonyOS",
+        "material": {
+          "storeFile": "C:/App/hpassword/hpassword.p12",
+          "storePassword": "0000001A7229D1CD5F3AD8CF2AE6DD74732320872430BEE3555BE959833DDBEA45205623A7C7209C65AA",
+          "keyAlias": "hpassword",
+          "keyPassword": "0000001A7FDF8328E197745E6C901AB40E83F4B34AD6341D83FD2E08CFC39C6F1FEA8FAB0A3546283FED",
+          "signAlg": "SHA256withECDSA",
+          "profile": "C:/App/hpassword/hpasswordRelease.p7b",
+          "certpath": "C:/App/hpassword/hpassword.cer"
+        }
+      }
+    ],
     "products": [
       {
         "name": "default",
