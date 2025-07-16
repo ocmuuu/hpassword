@@ -13,12 +13,32 @@
           "profile": "C:/App/hpassword/hpasswordRelease.p7b",
           "certpath": "C:/App/hpassword/hpassword.cer"
         }
+      },
+      {
+        "name": "devicedebug",
+        "type": "HarmonyOS",
+        "material": {
+          "certpath": "C:\\Users\\chaon\\.ohos\\config\\debug_hPassword_fRehQaxwY9pW47RoKaawGjjK71GPP7wIOVxKP3n61MM=.cer",
+          "keyAlias": "debugKey",
+          "keyPassword": "0000001A7D0444DAAC42B6CAB099D220F2156E5911361EB98BEBBDC39C24FEFB6DEADE2ED5FB3E98D7E9",
+          "profile": "C:\\Users\\chaon\\.ohos\\config\\debug_hPassword_fRehQaxwY9pW47RoKaawGjjK71GPP7wIOVxKP3n61MM=.p7b",
+          "signAlg": "SHA256withECDSA",
+          "storeFile": "C:\\Users\\chaon\\.ohos\\config\\debug_hPassword_fRehQaxwY9pW47RoKaawGjjK71GPP7wIOVxKP3n61MM=.p12",
+          "storePassword": "0000001AE9D0245FF624233EF98D6859B08617710387E4FD4AE3A31522079F942B28BA6E5F61A07903DB"
+        }
       }
     ],
     "products": [
       {
         "name": "default",
         "signingConfig": "default",
+        "compatibleSdkVersion": "5.0.5(17)",
+        "runtimeOS": "HarmonyOS",
+        "bundleName": "com.mznm.hpassword"
+      },
+      {
+        "name": "devicedebug",
+        "signingConfig": "devicedebug",
         "compatibleSdkVersion": "5.0.5(17)",
         "runtimeOS": "HarmonyOS",
         "bundleName": "com.mznm.hpassword"
@@ -42,6 +62,12 @@
           "name": "default",
           "applyToProducts": [
             "default"
+          ]
+        },
+        {
+          "name": "devicedebug",
+          "applyToProducts": [
+            "devicedebug"
           ]
         }
       ]
