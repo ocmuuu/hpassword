@@ -1,4 +1,5 @@
 import { EntryItem } from './EntryConverter'
+import { RenderField } from '../templates/FieldInfoHelper'
 
 // 随机密码类型配置接口
 interface PasswordTypeConfig {
@@ -132,5 +133,21 @@ export class PasswordGenerator {
       }
     })
     return list
+  }
+
+  /**
+   * 根据密码类型直接构建 RenderField 数组，供 UI 渲染
+   */
+  static buildRenderFields(type: number): RenderField[] {
+    const pwds = PasswordGenerator.generatePasswordList(type)
+    return pwds.map((pwd: string, idx: number): RenderField => {
+      const len = pwd.length
+      return {
+        key: `pwd_${idx + 1}`,
+        label: `${len}位密码 ${(idx % 3) + 1}`,
+        value: pwd,
+        type: 'text'
+      } as RenderField
+    })
   }
 } 

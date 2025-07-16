@@ -18,6 +18,7 @@ import { LayoutPreferencesUtil } from '../utils/LayoutPreferencesUtil'
 import { EntryService } from '../utils/EntryService'
 import { DatabaseFileService } from '../utils/DatabaseFileService'
 import { ClipboardUtil } from '../utils/ClipboardUtil'
+import { MainPageDataService } from '../utils/MainPageDataService'
 
 // 密码库项目类型（配置项中的原始数据）
 interface DatabaseItem {
@@ -109,10 +110,8 @@ struct MainPage {
 
   async aboutToAppear() {
     try {
-      // 获取应用上下文并初始化首选项
       const context = getContext(this) as Context
-      
-      // 尝试使用同步方法初始化
+
       let initialized = PreferencesUtil.initSync(context)
       if (!initialized) {
         initialized = await PreferencesUtil.init(context)
@@ -136,31 +135,26 @@ struct MainPage {
           this.kdbxQuery = new KdbxQuery(db)
           this.kdbxEntryManager = new KdbxEntryManager(db)
           this.kdbxGroupManager = new KdbxGroupManager(db)
-          
-          // 获取数据库名称
+
           if (db.meta && db.meta.name) {
             this.databaseName = db.meta.name
           }
-          
-          // 初始化文件管理器
+
           const context = getContext(this) as Context
           this.databaseFileManager = new DatabaseFileManager(context)
         }
-        
-        // 初始化数据
+
         await this.initializeData()
       } else {
         this.error = '数据库实例获取失败'
       }
       
-      // 设置搜索助手的回调
       this.searchHelper.setCallback((state: SearchState) => {
         this.searchState = state
       })
       
       this.isInitialized = true
-      
-      // 启动自动关闭计时器
+
       this.startAutoCloseTimer()
     } catch (error) {
       this.error = `初始化失败: ${error}`
@@ -174,11 +168,8 @@ struct MainPage {
   private async initializeData() {
     try {
       this.isLoading = true
-      
-      // 初始化侧边栏数据
       await this.initializeSidebarItems()
       
-      // 默认选中"所有条目"
       this.selectedSidebarId = 'all_entries'
       await this.loadEntriesForSidebar('all_entries')
       
@@ -193,105 +184,13 @@ struct MainPage {
    * 初始化侧边栏项目
    */
   private async initializeSidebarItems() {
-    const allItems: SidebarItem[] = []
-    const fixedItems: SidebarItem[] = []
-    const scrollableItems: SidebarItem[] = []
-    
-    // 固定的特殊项目
-    fixedItems.push({
-      id: 'starred',
-      title: '加星',
-      icon: $r('app.media.star'),
-      type: 'special'
-    })
-    
-    // 新增随机密码特殊项，位于"加星"之后
-    fixedItems.push({
-      id: 'random_password',
-      title: '随机密码',
-      icon: $r('app.media.random'),
-      type: 'special'
-    })
-    
-    fixedItems.push({
-      id: 'all_entries',
-      title: '所有条目',
-      icon: $r('app.media.all'),
-      type: 'special'
-    })
-    
-    // 添加分割线到固定区域
-    fixedItems.push({
-      id: 'divider_fixed',
-      title: '',
-      icon: $r('app.media.startIcon'),
-      type: 'divider'
-    })
-    
-    // 组项目（可滚动）
-    if (this.kdbxQuery) {
-      const groupsResult = await this.kdbxQuery.getAllGroups()
-      if (groupsResult.success && groupsResult.data) {
-        // 获取所有系统模板分组名称
-        const systemTemplateNames = TemplateManager.getSystemTemplateNames()
-        
-        // 先处理非回收站分组
-        let recycleBinGroup: SidebarItem | null = null
-        
-        for (const group of groupsResult.data) {
-          const isRecycleBin = group.name === 'Recycle Bin'
-          const groupName = group.name || '未命名'
-          
-          if (isRecycleBin) {
-            // 暂存回收站分组，稍后添加到最后
-            recycleBinGroup = {
-              id: group.uuid.id,
-              title: '回收站',
-              icon: $r('app.media.trash'),
-              type: 'recycle'
-            } as SidebarItem
-            continue
-          }
-          
-          // 判断是否为系统模板分组
-          const isSystemTemplate = systemTemplateNames.includes(groupName)
-          
-          // 过滤逻辑：
-          // 1. 非系统模板分组始终显示
-          // 2. 系统模板分组只有在有条目时才显示
-          let shouldShow = true
-          if (isSystemTemplate) {
-            // 检查该分组是否有条目
-            const groupResult = await this.kdbxQuery.getEntriesByGroup(group.uuid.id)
-            const hasEntries = !!(groupResult.success && groupResult.data && groupResult.data.length > 0)
-            shouldShow = hasEntries
-          }
-          
-          if (shouldShow) {
-            scrollableItems.push({
-              id: group.uuid.id,
-              title: groupName,
-              icon: EntryConverter.getTemplateIcon(groupName), // 根据模板分类获取图标
-              type: 'group'
-            })
-          }
-        }
-        
-        // 回收站始终显示在最后
-        if (recycleBinGroup) {
-          scrollableItems.push(recycleBinGroup)
-        }
-      }
+    if (!this.kdbxQuery) {
+      return
     }
-    
-    // 注意：回收站会作为普通组由 getAllGroups() 返回，不需要手动添加
-    
-    // 合并所有项目（保持向后兼容）
-    allItems.push(...fixedItems, ...scrollableItems)
-    
-    this.sidebarItems = allItems
-    this.fixedSidebarItems = fixedItems
-    this.scrollableSidebarItems = scrollableItems
+    const result = await MainPageDataService.buildSidebarItems(this.kdbxQuery)
+    this.sidebarItems = result.allItems
+    this.fixedSidebarItems = result.fixedItems
+    this.scrollableSidebarItems = result.scrollableItems
   }
 
   /**
@@ -302,48 +201,8 @@ struct MainPage {
       if (!this.kdbxQuery) {
         return
       }
-      
-      let entries: ESObject[] = []
-      
-      // 检查是否是回收站
-      const selectedItem = this.sidebarItems.find(item => item.id === sidebarId)
-      const isRecycleBin = selectedItem?.type === 'recycle'
-      
-      if (sidebarId === 'all_entries') {
-        const allResult = await this.kdbxQuery.getAllEntries()
-        if (allResult.success && allResult.data) {
-          // 排除回收站的条目
-          entries = allResult.data.filter((entry: ESObject): boolean => {
-            const parentGroup: ESObject | null = entry.parentGroup as ESObject | null
-            return parentGroup !== null && (parentGroup.name as string) !== 'Recycle Bin'
-          })
-        } else {
-          entries = []
-        }
-      } else if (sidebarId === 'starred') {
-        const starredResult = await this.kdbxQuery.getStarredEntries()
-        entries = starredResult.success && starredResult.data ? starredResult.data : []
-      } else if (isRecycleBin) {
-        const recycleResult = await this.kdbxQuery.getRecycleBinEntries()
-        entries = recycleResult.success && recycleResult.data ? recycleResult.data : []
-      } else if (sidebarId === 'random_password') {
-        // 随机密码三种类型由工具生成
-        this.entryItems = PasswordGenerator.getRandomPasswordEntryItems(16)
-        return
-      } else {
-        // 普通组条目
-        const groupResult = await this.kdbxQuery.getEntriesByGroup(sidebarId)
-        entries = groupResult.success && groupResult.data ? groupResult.data : []
-      }
-      
-             // 转换为UI显示格式
-       const mappedItems: EntryItem[] = entries.map((entryRaw: ESObject) => {
-         const entry: ESObject = entryRaw as ESObject;
-         const entryItem = EntryConverter.convertKdbxEntryToEntryItem(entry, undefined, this.kdbxEntryManager ?? undefined);
-         return entryItem;
-       }).filter(item => item !== null) as EntryItem[];
-       this.entryItems = mappedItems
-      
+      const entries = await MainPageDataService.fetchEntriesForSidebar(this.kdbxQuery, this.sidebarItems, sidebarId)
+      this.entryItems = entries
     } catch (error) {
       console.error('MainPage', '加载条目失败:', error)
     }
@@ -353,25 +212,19 @@ struct MainPage {
    * 侧边栏项目点击处理
    */
   private async onSidebarItemClick(item: SidebarItem) {
-    // 重置自动关闭计时器
     this.resetAutoCloseTimer()
     
-    // 分割线不可点击
     if (item.type === 'divider') {
       return
     }
     
-    // 清空搜索状态
     this.searchHelper.clearSearch()
     
     this.selectedSidebarId = item.id
     this.selectedEntryId = null
     this.selectedEntry = null
     
-    // 加载对应的条目列表
     await this.loadEntriesForSidebar(item.id)
-    
-         // 保存选中状态
      if (PreferencesUtil.isInitialized()) {
        PreferencesUtil.saveSelectedKdbxSidebarIdSync(item.id)
      }
@@ -382,25 +235,16 @@ struct MainPage {
    */
   private onEntryItemClick(entry: EntryItem) {
     try {
-      // 重置自动关闭计时器
       this.resetAutoCloseTimer()
-      
-      // 使用通用方法安全地更新选中条目
       this.updateSelectedEntry(entry)
       
-      // 如果当前在搜索状态，清除搜索
       if (this.searchState.isSearching) {
         this.searchHelper.clearSearch()
-        
-        // 如果条目有分组信息，异步切换到对应的分组
         if (entry.groupId && entry.groupId !== this.selectedSidebarId) {
           this.selectedSidebarId = entry.groupId
-          // 异步加载分组条目，不等待完成
           this.loadEntriesForSidebar(entry.groupId).then(() => {
-            // 重新从加载的条目中找到对应的条目（确保数据一致性）
             const updatedEntry = this.entryItems.find(item => item.id === entry.id)
             if (updatedEntry) {
-              // 使用通用方法安全地更新选中条目
               this.updateSelectedEntry(updatedEntry)
             }
           }).catch((error: ESObject) => {
@@ -417,17 +261,13 @@ struct MainPage {
    * 安全地更新 selectedEntry，确保触发响应式更新
    */
   private updateSelectedEntry(entry: EntryItem): void {
-    // 递增更新计数器，强制触发响应式更新
     this.updateCounter++
     
-    // 先完全清空状态，触发UI重新渲染
     this.selectedEntry = null
     this.renderFields = []
     this.passwordVisible = new Set()
     
-    // 使用 nextTick 确保状态变化被检测到
     setTimeout(() => {
-      // 创建新的条目对象，确保所有嵌套对象都是全新的
       const newFields = new Map<string, string>()
       if (entry.fields) {
         entry.fields.forEach((value, key) => {
@@ -449,23 +289,12 @@ struct MainPage {
       }
       this.selectedEntryId = entry.id
       
-      // 随机密码类型：直接生成 10 条密码明文列表
       if (entry.groupId === 'random_password') {
         const pwdType = Number(newFields.get('Type') || 1)
-        const pwds = PasswordGenerator.generatePasswordList(pwdType)
-        const renderList: RenderField[] = pwds.map((pwd: string, idx: number): RenderField => {
-          const len = pwd.length
-          return {
-            key: `pwd_${idx + 1}`,
-            label: `${len}位密码 ${(idx % 3) + 1}`,
-            value: pwd,
-            type: 'text'
-          } as RenderField
-        })
+        const renderList: RenderField[] = PasswordGenerator.buildRenderFields(pwdType)
         this.renderFields = renderList
         this.sortedFields = renderList.map(f => f.key)
       } else {
-        // 立即处理字段排序
         const rf = EntryService.buildRenderFields(this.selectedEntry)
         this.renderFields = rf.renderFields
         this.sortedFields = rf.sortedKeys
@@ -477,7 +306,6 @@ struct MainPage {
    * 强制UI刷新的辅助方法
    */
   private forceUIRefresh() {
-    // 通过触发状态变化强制UI重新渲染
     const temp = this.selectedEntry
     this.selectedEntry = null
     setTimeout(() => {

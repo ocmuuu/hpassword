@@ -1,5 +1,4 @@
 import router from '@ohos.router'
-import { common } from '@kit.AbilityKit'
 import { DatabaseFileManager } from '../utils/DatabaseFileManager'
 import PreferencesUtil from '../utils/PreferencesUtil'
 import { LayoutPreferencesUtil } from '../utils/LayoutPreferencesUtil'
@@ -8,28 +7,7 @@ import DirtyFlag from '../utils/DirtyFlag'
 import { KdbxCore, KdbxCoreManager } from '../utils/KdbxCore'
 import { ProtectedValue, KdbxCredentials } from '../lib'
 import { ClipboardUtil } from '../utils/ClipboardUtil'
-
-// 密码库项目类型（配置项中的原始数据）
-interface DatabaseItem {
-  id: string
-  name: string
-  path: string
-  lastModified: string
-  size: number
-}
-
-// 页面显示用的密码库项目类型（包含转换后的显示信息）
-interface DisplayDatabaseItem {
-  id: string
-  name: string
-  path: string
-  lastModified: string
-  size: number
-  // 转换后的显示字段
-  displayDir: string
-  displayFileName: string
-  displaySize: string
-}
+import { DatabaseItem, DisplayDatabaseItem, convertToDisplayItem, isValidKdbxFileName } from '../utils/DatabaseDisplayUtil'
 
 @Entry
 @Component
@@ -176,7 +154,8 @@ struct KdbxPage {
       }
 
       // 将原始数据转换为页面显示数据
-      this.databaseItems = validOriginalList.map(item => this.convertToDisplayItem(item));
+      const context = getContext(this) as Context;
+      this.databaseItems = validOriginalList.map(item => convertToDisplayItem(item, context));
 
       // 同步首选项，去除无效项（保存原始数据）
       PreferencesUtil.saveKdbxDatabaseListSync(JSON.stringify(validOriginalList));
@@ -203,45 +182,6 @@ struct KdbxPage {
        
     } catch (error) {
       console.error('KdbxPage', '加载密码库列表失败:', error)
-    }
-  }
-
-  /**
-   * 将原始密码库项目转换为页面显示项目
-   */
-  private convertToDisplayItem(item: DatabaseItem): DisplayDatabaseItem {
-    // 使用 getDisplayPath 函数获取完整路径
-    const fullPath = this.getDisplayPath(item)
-    
-    let displayDir = ''
-    let displayFileName = item.path
-    
-    if (fullPath.includes('/')) {
-      displayDir = fullPath.substring(0, fullPath.lastIndexOf('/'))
-      displayFileName = fullPath.substring(fullPath.lastIndexOf('/') + 1)
-    } else {
-      displayDir = '应用数据目录'
-      displayFileName = fullPath
-    }
-    
-    let displaySize = ''
-    if (item.size >= 1024 * 1024) {
-      displaySize = `${(item.size / (1024 * 1024)).toFixed(2)} MB`
-    } else if (item.size >= 1024) {
-      displaySize = `${(item.size / 1024).toFixed(1)} KB`
-    } else {
-      displaySize = `${item.size} B`
-    }
-    
-    return {
-      id: item.id,
-      name: item.name,
-      path: item.path,
-      lastModified: item.lastModified,
-      size: item.size,
-      displayDir,
-      displayFileName,
-      displaySize
     }
   }
 
@@ -353,52 +293,6 @@ struct KdbxPage {
     const currentId: string = PreferencesUtil.getKdbxCurrentDatabaseIdSync();
     return item.id === currentId ? $r('app.media.select') : $r('app.media.unselect');
   }
-
-  /**
-   * 获取用于显示的密码库文件完整路径
-   * 如果首选项中保存的 path 已经是绝对路径则直接返回；
-   * 否则拼接 filesDir 形成完整路径，方便用户备份。
-   */
-  private getDisplayPath(db: DatabaseItem): string {
-    if (!db || !db.path) {
-      return '';
-    }
-    if (db.path.includes('/')) {
-      // 如果是内部路径，尝试转换为外部可见路径 /storage/Users/currentUser/appdata/... 方便备份
-      if (db.path.startsWith('/data/storage')) {
-        try {
-          const ctx = getContext(this) as common.UIAbilityContext;
-          const bundleName: string = ((ctx as ESObject).bundleName as string) ?? 'com.mznm.hpassword';
-          return db.path.replace('/data/storage', '/storage/Users/currentUser/appdata')
-            .replace('/base/haps', `/base/${bundleName}/haps`);
-        } catch(_) {
-          // 转换失败时返回原始路径
-          return db.path;
-        }
-      }
-      return db.path;
-    }
-    try {
-      const context = getContext(this) as Context;
-      // 普通文件名，拼接内部 filesDir，再做一遍转换
-      const internalPath = `${context.filesDir}/${db.path}`;
-      if (internalPath.startsWith('/data/storage')) {
-        try {
-          const ctx = getContext(this) as common.UIAbilityContext;
-          const bundleName: string = ((ctx as ESObject).bundleName as string) ?? 'com.mznm.hpassword';
-          return internalPath.replace('/data/storage', '/storage/Users/currentUser/appdata')
-            .replace('/base/haps', `/base/${bundleName}/haps`);
-        } catch(_) {
-          return internalPath;
-        }
-      }
-      return internalPath;
-    } catch (_) {
-      return db.path;
-    }
-  }
-
-
 
   /** 复制文本到剪贴板并显示提示 */
   private async copyToClipboard(text: string): Promise<void> {
@@ -1058,7 +952,7 @@ struct KdbxPage {
       this.showFormError('仅输入文件名，不含路径');
       return;
     }
-    if (!this.isValidKdbxFileName(this.newDbPath.trim())) {
+    if (!isValidKdbxFileName(this.newDbPath.trim())) {
       this.showFormError('文件名仅允许英文、数字、下划线，且以 .kdbx 结尾');
       return;
     }
@@ -1149,7 +1043,8 @@ struct KdbxPage {
       PreferencesUtil.saveKdbxDatabaseListSync(JSON.stringify(currentOriginalList));
 
       // 转换为显示项目并更新页面显示列表  
-      const newDisplayItem = this.convertToDisplayItem(newOriginalItem);
+      const ctxNew = getContext(this) as Context;
+      const newDisplayItem = convertToDisplayItem(newOriginalItem, ctxNew);
       this.databaseItems.push(newDisplayItem);
       // 不自动切换当前使用的密码库，保持原有的密码库不变
 
@@ -1288,7 +1183,7 @@ struct KdbxPage {
             .height(50)
             .fontSize(16)
             .fontWeight(FontWeight.Medium)
-            .backgroundColor('#4CAF50')
+            .backgroundColor('#1976D2')
             .borderRadius(8)
             .margin({ right: 5 })
             .onClick(() => {
@@ -1315,11 +1210,6 @@ struct KdbxPage {
     }
     .width('100%')
     .height('100%')
-  }
-
-  private isValidKdbxFileName(fileName: string): boolean {
-    const pattern: RegExp = /^[A-Za-z0-9_]+\.kdbx$/;
-    return pattern.test(fileName);
   }
 
   /**
@@ -1560,7 +1450,8 @@ struct KdbxPage {
       PreferencesUtil.saveKdbxDatabaseListSync(JSON.stringify(currentOriginalList));
 
       // 仅修改名称时：更新页面显示数据，刷新第一栏密码库列表UI
-      const updatedDisplayItem = this.convertToDisplayItem(currentItem);
+      const ctxEdit = getContext(this) as Context;
+      const updatedDisplayItem = convertToDisplayItem(currentItem, ctxEdit);
       const index = this.databaseItems.findIndex(item => item.id === this.selectedDatabase!.id);
       if (index !== -1) {
         // 创建新的 DisplayDatabaseItem 数组以触发ArkUI响应式更新
