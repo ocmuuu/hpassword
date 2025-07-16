@@ -1,5 +1,5 @@
 import router from '@ohos.router'
-import PreferencesUtil from '../utils/PreferencesUtil'
+import { LayoutPreferencesUtil } from '../utils/LayoutPreferencesUtil'
 
 import HelpItemModel from '../helps/HelpItemModel'
 import { helpItems as allHelps } from '../helps/index'
@@ -14,11 +14,9 @@ struct HelpPage {
 
   async aboutToAppear() {
     try {
-      if (PreferencesUtil.isInitialized()) {
-        const savedWidth = PreferencesUtil.getKdbxFirstColumnWidthSync()
-        if (savedWidth >= 200 && savedWidth <= 300) {
-          this.firstColumnWidth = savedWidth
-        }
+      const layout = await LayoutPreferencesUtil.restoreLayoutStates()
+      if (layout.firstWidth >= 200 && layout.firstWidth <= 300) {
+        this.firstColumnWidth = layout.firstWidth
       }
     } catch (error) {
       console.error('HelpPage', '读取列宽失败:', error)

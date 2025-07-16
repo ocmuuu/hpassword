@@ -2,11 +2,12 @@ import router from '@ohos.router'
 import { common } from '@kit.AbilityKit'
 import { DatabaseFileManager } from '../utils/DatabaseFileManager'
 import PreferencesUtil from '../utils/PreferencesUtil'
-import pasteboard from '@ohos.pasteboard'
+import { LayoutPreferencesUtil } from '../utils/LayoutPreferencesUtil'
 import fs from '@ohos.file.fs'
 import DirtyFlag from '../utils/DirtyFlag'
 import { KdbxCore, KdbxCoreManager } from '../utils/KdbxCore'
 import { ProtectedValue, KdbxCredentials } from '../lib'
+import { ClipboardUtil } from '../utils/ClipboardUtil'
 
 // 密码库项目类型（配置项中的原始数据）
 interface DatabaseItem {
@@ -91,8 +92,9 @@ struct KdbxPage {
       }
       
       if (initialized) {
-        // 恢复布局状态
-        await this.restoreLayoutStates()
+        const layout = await LayoutPreferencesUtil.restoreLayoutStates()
+        this.isFirstColumnCollapsed = layout.collapsed
+        this.firstColumnWidth = layout.firstWidth
       }
       
       // 初始化文件管理器
@@ -105,30 +107,6 @@ struct KdbxPage {
     } catch (error) {
       this.error = `初始化失败: ${error}`
       this.isInitialized = true
-    }
-  }
-
-  /**
-   * 恢复布局状态
-   */
-  private async restoreLayoutStates() {
-    try {
-      if (!PreferencesUtil.isInitialized()) {
-        return
-      }
-
-      // 恢复第一栏折叠状态
-      this.isFirstColumnCollapsed = PreferencesUtil.getKdbxFirstColumnCollapseStateSync()
-      
-      // 恢复列宽度
-      const savedFirstWidth = PreferencesUtil.getKdbxFirstColumnWidthSync()
-      
-      if (savedFirstWidth >= 200 && savedFirstWidth <= 250) {
-        this.firstColumnWidth = savedFirstWidth
-      }
-      
-    } catch (error) {
-      console.error('KdbxPage', '恢复布局状态失败:', error)
     }
   }
 
@@ -363,10 +341,7 @@ struct KdbxPage {
   private onToggleFirstColumn() {
     this.isFirstColumnCollapsed = !this.isFirstColumnCollapsed
     
-    // 保存状态
-    if (PreferencesUtil.isInitialized()) {
-      PreferencesUtil.saveKdbxFirstColumnCollapseStateSync(this.isFirstColumnCollapsed)
-    }
+    LayoutPreferencesUtil.saveFirstColumnCollapseState(this.isFirstColumnCollapsed)
   }
 
   /**
@@ -428,9 +403,7 @@ struct KdbxPage {
   /** 复制文本到剪贴板并显示提示 */
   private async copyToClipboard(text: string): Promise<void> {
     try {
-      const data = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, text)
-      const sysPb = pasteboard.getSystemPasteboard()
-      await sysPb.setData(data)
+      await ClipboardUtil.copy(text)
 
       // 清除旧定时器
       if (this.copySuccessTimer !== null) {
@@ -1827,9 +1800,7 @@ struct KdbxPage {
                   this.firstColumnWidth = newFirstWidth
                 })
                 .onActionEnd(() => {
-                  if (PreferencesUtil.isInitialized()) {
-                    PreferencesUtil.saveKdbxFirstColumnWidthSync(this.firstColumnWidth)
-                  }
+                  LayoutPreferencesUtil.saveFirstColumnWidth(this.firstColumnWidth)
                 })
             )
         }

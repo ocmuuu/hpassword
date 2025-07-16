@@ -13,6 +13,11 @@ import { FieldInfoHelper, FieldInfo, RenderField } from '../templates/FieldInfoH
 import { SearchHelper, SearchState } from '../utils/SearchHelper'
 import { LoginTemplate } from '../templates/Login'
 import { FieldSpec } from '../templates/TemplateTypes'
+import { PasswordGenerator } from '../utils/PasswordGenerator'
+import { LayoutPreferencesUtil } from '../utils/LayoutPreferencesUtil'
+import { EntryService } from '../utils/EntryService'
+import { DatabaseFileService } from '../utils/DatabaseFileService'
+import { ClipboardUtil } from '../utils/ClipboardUtil'
 
 // 密码库项目类型（配置项中的原始数据）
 interface DatabaseItem {
@@ -115,7 +120,10 @@ struct MainPage {
       
       if (initialized) {
         // 恢复布局状态
-        await this.restoreLayoutStates()
+        const layout = await LayoutPreferencesUtil.restoreLayoutStates()
+        this.isFirstColumnCollapsed = layout.collapsed
+        this.firstColumnWidth = layout.firstWidth
+        this.secondColumnWidth = layout.secondWidth
       }
       
       // 从全局管理器获取KdbxCore实例
@@ -161,34 +169,6 @@ struct MainPage {
   }
 
   /**
-   * 恢复布局状态
-   */
-  private async restoreLayoutStates() {
-    try {
-      if (!PreferencesUtil.isInitialized()) {
-        return
-      }
-
-      // 恢复第一栏折叠状态
-      this.isFirstColumnCollapsed = PreferencesUtil.getKdbxFirstColumnCollapseStateSync()
-      
-      // 恢复列宽度
-      const savedFirstWidth = PreferencesUtil.getKdbxFirstColumnWidthSync()
-      const savedSecondWidth = PreferencesUtil.getKdbxSecondColumnWidthSync()
-      
-      if (savedFirstWidth >= 200 && savedFirstWidth <= 250) {
-        this.firstColumnWidth = savedFirstWidth
-      }
-      if (savedSecondWidth >= 250 && savedSecondWidth <= 350) {
-        this.secondColumnWidth = savedSecondWidth
-      }
-      
-    } catch (error) {
-      console.error('MainPage', '恢复布局状态失败:', error)
-    }
-  }
-
-  /**
    * 初始化数据
    */
   private async initializeData() {
@@ -222,6 +202,14 @@ struct MainPage {
       id: 'starred',
       title: '加星',
       icon: $r('app.media.star'),
+      type: 'special'
+    })
+    
+    // 新增随机密码特殊项，位于"加星"之后
+    fixedItems.push({
+      id: 'random_password',
+      title: '随机密码',
+      icon: $r('app.media.random'),
       type: 'special'
     })
     
@@ -338,6 +326,10 @@ struct MainPage {
       } else if (isRecycleBin) {
         const recycleResult = await this.kdbxQuery.getRecycleBinEntries()
         entries = recycleResult.success && recycleResult.data ? recycleResult.data : []
+      } else if (sidebarId === 'random_password') {
+        // 随机密码三种类型由工具生成
+        this.entryItems = PasswordGenerator.getRandomPasswordEntryItems(16)
+        return
       } else {
         // 普通组条目
         const groupResult = await this.kdbxQuery.getEntriesByGroup(sidebarId)
@@ -355,26 +347,6 @@ struct MainPage {
     } catch (error) {
       console.error('MainPage', '加载条目失败:', error)
     }
-  }
-
-  /**
-   * 处理字段排序逻辑
-   */
-  private processSortedFields() {
-    if (!this.selectedEntry?.fields) {
-      this.sortedFields = [];
-      this.renderFields = [];
-      return;
-    }
-
-    // 使用 FieldInfoHelper 进行字段处理
-    this.renderFields = FieldInfoHelper.processSortedFields(
-      this.selectedEntry.fields,
-      this.selectedEntry.groupName
-    );
-
-    // 为了保持兼容性，更新 sortedFields（UI 可能仍然需要这个数组）
-    this.sortedFields = this.renderFields.map(field => field.key);
   }
 
   /**
@@ -444,7 +416,7 @@ struct MainPage {
   /**
    * 安全地更新 selectedEntry，确保触发响应式更新
    */
-  private updateSelectedEntry(entry: EntryItem) {
+  private updateSelectedEntry(entry: EntryItem): void {
     // 递增更新计数器，强制触发响应式更新
     this.updateCounter++
     
@@ -477,8 +449,27 @@ struct MainPage {
       }
       this.selectedEntryId = entry.id
       
-      // 立即处理字段排序
-      this.processSortedFields()
+      // 随机密码类型：直接生成 10 条密码明文列表
+      if (entry.groupId === 'random_password') {
+        const pwdType = Number(newFields.get('Type') || 1)
+        const pwds = PasswordGenerator.generatePasswordList(pwdType)
+        const renderList: RenderField[] = pwds.map((pwd: string, idx: number): RenderField => {
+          const len = pwd.length
+          return {
+            key: `pwd_${idx + 1}`,
+            label: `${len}位密码 ${(idx % 3) + 1}`,
+            value: pwd,
+            type: 'text'
+          } as RenderField
+        })
+        this.renderFields = renderList
+        this.sortedFields = renderList.map(f => f.key)
+      } else {
+        // 立即处理字段排序
+        const rf = EntryService.buildRenderFields(this.selectedEntry)
+        this.renderFields = rf.renderFields
+        this.sortedFields = rf.sortedKeys
+      }
     }, 1)
   }
 
@@ -503,30 +494,7 @@ struct MainPage {
     
     this.isFirstColumnCollapsed = !this.isFirstColumnCollapsed
     
-         // 保存状态
-     if (PreferencesUtil.isInitialized()) {
-       PreferencesUtil.saveKdbxFirstColumnCollapseStateSync(this.isFirstColumnCollapsed)
-     }
-  }
-
-  /**
-   * 返回首页：保存并关闭数据库，跳转到 Index 页面并重置密码输入
-   */
-  private async returnToIndex() {
-    try {
-      // 先尝试保存数据库（忽略保存失败不阻止返回）
-      await this.saveDatabaseToFile();
-    } catch (error) {
-      console.error('MainPage', '返回时保存数据库失败:', error);
-    }
-
-    // 清理当前数据库实例
-    KdbxCoreManager.getInstance().clearCurrentKdbxCore();
-
-    // 使用 replaceUrl 跳转并替换当前页面，避免保留旧页面状态
-    router.replaceUrl({
-      url: 'pages/Index'
-    });
+    LayoutPreferencesUtil.saveFirstColumnCollapseState(this.isFirstColumnCollapsed)
   }
 
   /**
@@ -536,7 +504,7 @@ struct MainPage {
     // 清除自动关闭计时器（用户主动返回）
     this.clearAutoCloseTimer()
     
-    await this.returnToIndex()
+    await DatabaseFileService.returnToIndex(this.kdbxCore, this.databaseFileManager)
   }
 
   /**
@@ -650,10 +618,10 @@ struct MainPage {
             
             // 加星/取消加星按钮
             Button() {
-              Image(this.isEntryStarred(this.selectedEntry) ? $r('app.media.star') : $r('app.media.unstar'))
+              Image(EntryService.isEntryStarred(this.selectedEntry) ? $r('app.media.star') : $r('app.media.unstar'))
                 .width(20)
                 .height(20)
-                .fillColor(this.isEntryStarred(this.selectedEntry) ? '#FFD700' : '#666')
+                .fillColor(EntryService.isEntryStarred(this.selectedEntry) ? '#FFD700' : '#666')
             }
             .backgroundColor('transparent')
             .padding(4)
@@ -669,7 +637,7 @@ struct MainPage {
                   const result = this.kdbxEntryManager.toggleEntryStarred(kdbxEntry);
                   if (result.success) {
                     // 保存数据库到文件
-                    await this.saveDatabaseToFile();
+                    await DatabaseFileService.saveDatabaseToFile(this.kdbxCore, this.databaseFileManager);
                     
                     // 刷新列表
                     await this.loadEntriesForSidebar(this.selectedSidebarId || 'all_entries');
@@ -730,7 +698,7 @@ struct MainPage {
             const delResult = this.kdbxEntryManager.deleteEntry(kdbxEntry as ESObject)
             
             if (delResult.success) {
-              await this.saveDatabaseToFile()
+              await DatabaseFileService.saveDatabaseToFile(this.kdbxCore, this.databaseFileManager);
 
               // 重新构建侧边栏数据（更新计数）
               await this.initializeSidebarItems()
@@ -1300,30 +1268,6 @@ struct MainPage {
 
 
   /**
-   * 判断条目是否已加星
-   */
-  private isEntryStarred(entry: EntryItem | null): boolean {
-    if (!entry) return false;
-    
-    // 从fields中查找star相关标记
-    const fields = entry.fields;
-    if (!fields) return false;
-    
-    // 检查是否有star字段
-    if (fields.get('Starred') === 'true') {
-      return true;
-    }
-    
-    // 检查标签（如果有的话）
-    const tags = fields.get('Tags') || '';
-    if (tags.toLowerCase().includes('star') || tags.toLowerCase().includes('favorite')) {
-      return true;
-    }
-    
-    return false;
-  }
-
-  /**
    * 通过ID获取KdbxEntry对象
    */
   private async getKdbxEntryById(entryId: string): Promise<ESObject | null> {
@@ -1344,76 +1288,11 @@ struct MainPage {
   }
 
   /**
-   * 保存数据库到文件
-   */
-  private async saveDatabaseToFile(): Promise<void> {
-    try {
-      if (!this.kdbxCore || !this.databaseFileManager) {
-        console.error('MainPage', '数据库核心或文件管理器未初始化');
-        return;
-      }
-
-      const database = this.kdbxCore.getDatabase();
-      if (!database) {
-        console.error('MainPage', '数据库实例不存在');
-        return;
-      }
-
-      // 获取当前打开的密码库ID
-      const currentId: string = PreferencesUtil.getKdbxCurrentDatabaseIdSync();
-      let targetFileName: string = '';
-      
-      if (currentId === 'default' || !currentId) {
-        // 默认密码库，保存到 default.kdbx
-        targetFileName = 'default.kdbx';
-        console.log('MainPage', '保存到默认密码库文件:', targetFileName);
-      } else {
-        // 非默认密码库，需要从数据库列表中获取文件路径
-        try {
-          const listJson: string = PreferencesUtil.getKdbxDatabaseListSync();
-          const list: DatabaseItem[] = JSON.parse(listJson) as DatabaseItem[];
-          const currentDb = list.find((it: DatabaseItem) => it.id === currentId);
-          
-          if (currentDb && currentDb.path) {
-            targetFileName = currentDb.path;
-            console.log('MainPage', '保存到当前密码库文件:', currentDb.name, '路径:', targetFileName);
-          } else {
-            console.error('MainPage', '严重错误：未找到当前密码库信息，无法确定保存路径，拒绝保存以防止数据污染');
-            console.error('MainPage', '当前密码库ID:', currentId, '可用密码库列表:', list.map(db => `${db.name}(${db.id})`).join(', '));
-            return; // 直接返回，不进行保存
-          }
-        } catch (e) {
-          console.error('MainPage', '严重错误：解析数据库列表失败，无法确定保存路径，拒绝保存以防止数据污染:', e);
-          return; // 直接返回，不进行保存
-        }
-      }
-
-      // 确保targetFileName不为空
-      if (!targetFileName) {
-        console.error('MainPage', '严重错误：无法确定目标文件名，拒绝保存');
-        return;
-      }
-
-      const saveResult = await this.databaseFileManager.saveDatabaseToFile(database, targetFileName);
-      if (!saveResult.success) {
-        console.error('MainPage', '数据库保存失败:', saveResult.error);
-      } else {
-        console.log('MainPage', '数据库保存成功到:', targetFileName);
-      }
-    } catch (error) {
-      console.error('MainPage', '保存数据库时发生错误:', error);
-    }
-  }
-
-  /**
    * 复制文本到剪贴板
    */
   private async copyToClipboard(text: string): Promise<void> {
     try {
-      const pasteboardData = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, text)
-      const systemPasteboard = pasteboard.getSystemPasteboard()
-      await systemPasteboard.setData(pasteboardData)
-      console.log('MainPage', '复制成功:', text.substring(0, 20) + (text.length > 20 ? '...' : ''))
+      await ClipboardUtil.copy(text)
       
       // 清除之前的定时器
       if (this.copySuccessTimer !== null) {
@@ -1671,7 +1550,7 @@ struct MainPage {
       if (createResult.success && createResult.data) {
 
         // 保存到文件
-        await this.saveDatabaseToFile()
+        await DatabaseFileService.saveDatabaseToFile(this.kdbxCore, this.databaseFileManager);
 
         // 新建条目 ID
         const newEntryId = ((createResult.data.uuid as ESObject).id) as string
@@ -1777,7 +1656,7 @@ struct MainPage {
 
       if (result.success) {
         // 保存
-        await this.saveDatabaseToFile()
+        await DatabaseFileService.saveDatabaseToFile(this.kdbxCore, this.databaseFileManager);
 
         // 刷新列表和详情
         await this.loadEntriesForSidebar(this.selectedSidebarId || 'all_entries')
@@ -1951,9 +1830,7 @@ struct MainPage {
                   this.firstColumnWidth = newFirstWidth
                 })
                                  .onActionEnd(() => {
-                   if (PreferencesUtil.isInitialized()) {
-                     PreferencesUtil.saveKdbxFirstColumnWidthSync(this.firstColumnWidth)
-                   }
+                   LayoutPreferencesUtil.saveFirstColumnWidth(this.firstColumnWidth)
                  })
             )
         }
@@ -2069,7 +1946,7 @@ struct MainPage {
             .layoutWeight(1)
             .justifyContent(FlexAlign.Center)
             .backgroundColor('#fff')
-          } else if (this.getCurrentDisplayEntries().length === 0) {
+          } else if (EntryService.getCurrentDisplayEntries(this.searchState, this.entryItems).length === 0) {
             Column() {
               Image($r('app.media.startIcon'))
                 .width(60)
@@ -2095,12 +1972,12 @@ struct MainPage {
           } else {
             Scroll() {
               Column() {
-                ForEach(this.getCurrentDisplayEntries(), (entry: EntryItem) => {
+                ForEach(EntryService.getCurrentDisplayEntries(this.searchState, this.entryItems), (entry: EntryItem) => {
                   Column() {
                     this.EntryItemView(entry)
                     
                     // 分割线
-                    if (entry.id !== this.getCurrentDisplayEntries()[this.getCurrentDisplayEntries().length - 1]?.id) {
+                    if (entry.id !== EntryService.getCurrentDisplayEntries(this.searchState, this.entryItems)[EntryService.getCurrentDisplayEntries(this.searchState, this.entryItems).length - 1]?.id) {
                       Divider()
                         .strokeWidth(0.8)
                         .color('#e0e0e0')
@@ -2143,9 +2020,7 @@ struct MainPage {
                 this.secondColumnWidth = newSecondWidth
               })
                              .onActionEnd(() => {
-                 if (PreferencesUtil.isInitialized()) {
-                   PreferencesUtil.saveKdbxSecondColumnWidthSync(this.secondColumnWidth)
-                 }
+                 LayoutPreferencesUtil.saveSecondColumnWidth(this.secondColumnWidth)
                })
           )
 
@@ -2166,40 +2041,36 @@ struct MainPage {
   /**
    * 启动自动关闭计时器
    */
-  private startAutoCloseTimer() {
-    // 清除已有计时器
-    this.clearAutoCloseTimer()
-    
-    // 启动新计时器
-    this.autoCloseTimer = setTimeout(() => {
-      this.autoCloseDatabase()
-    }, this.AUTO_CLOSE_TIMEOUT)
+  private startAutoCloseTimer(): void {
+    this.autoCloseTimer = LayoutPreferencesUtil.startAutoCloseTimer(
+      this.autoCloseTimer,
+      this.AUTO_CLOSE_TIMEOUT,
+      () => this.autoCloseDatabase()
+    )
   }
 
   /**
    * 重置自动关闭计时器
    */
-  private resetAutoCloseTimer() {
+  private resetAutoCloseTimer(): void {
     this.startAutoCloseTimer()
   }
 
   /**
    * 清除自动关闭计时器
    */
-  private clearAutoCloseTimer() {
-    if (this.autoCloseTimer !== null) {
-      clearTimeout(this.autoCloseTimer)
-      this.autoCloseTimer = null
-    }
+  private clearAutoCloseTimer(): void {
+    LayoutPreferencesUtil.clearAutoCloseTimer(this.autoCloseTimer)
+    this.autoCloseTimer = null
   }
 
   /**
    * 自动关闭数据库
    */
-  private async autoCloseDatabase() {
+  private async autoCloseDatabase(): Promise<void> {
     try {
       // 执行与返回按钮相同的逻辑
-      await this.returnToIndex()
+      await DatabaseFileService.returnToIndex(this.kdbxCore, this.databaseFileManager)
     } catch (error) {
       console.error('MainPage', '自动关闭数据库失败:', error)
     }
@@ -2223,16 +2094,6 @@ struct MainPage {
       clearTimeout(this.validationErrorTimer)
       this.validationErrorTimer = null
     }
-  }
-
-  /**
-   * 获取当前显示的条目列表（搜索时显示搜索结果，否则显示侧边栏选中的条目）
-   */
-  private getCurrentDisplayEntries(): EntryItem[] {
-    if (this.searchState.isSearching) {
-      return this.searchState.results
-    }
-    return this.entryItems
   }
 
   /**
