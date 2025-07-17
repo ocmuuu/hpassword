@@ -1,4 +1,11 @@
 {
+  "module": {
+    "arkts": {
+      "exclude": [
+        "entry/src/test/**/*"
+      ]
+    }
+  },
   "files": [
     "**/*.ets"
   ],
