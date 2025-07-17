@@ -387,19 +387,21 @@ export function generateUuidString(): string {
  * 记录操作日志
  */
 export function logOperation(operation: string, details?: LogParams): void {
-  hilog.info(0, TAG, '操作: %{public}s', operation);
-  if (details) {
-    hilog.info(0, TAG, '详情: %{public}s', JSON.stringify(details));
-  }
+  //hilog.info(0, TAG, '操作: %{public}s', operation);
+  //if (details) {
+  //  hilog.info(0, TAG, '详情: %{public}s', JSON.stringify(details));
+  //}
+  return
 }
 
 /**
  * 记录错误日志
  */
 export function logError(operation: string, error: Error): void {
-  hilog.error(0, TAG, '操作失败: %{public}s', operation);
-  hilog.error(0, TAG, '错误: %{public}s', error.message);
-  if (error.stack) {
-    hilog.error(0, TAG, '堆栈: %{public}s', error.stack);
-  }
+  //hilog.error(0, TAG, '操作失败: %{public}s', operation);
+  //hilog.error(0, TAG, '错误: %{public}s', error.message);
+  //if (error.stack) {
+  //  hilog.error(0, TAG, '堆栈: %{public}s', error.stack);
+  //}
+  return
 } 

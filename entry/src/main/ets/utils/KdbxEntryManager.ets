@@ -114,8 +114,6 @@ export class KdbxEntryManager {
       // 标记数据库已修改
       this.markModified();
 
-      hilog.info(0, TAG, '条目创建成功: %{public}s', params.title);
-
       // 触发事件
       if (this.onEvent) {
         const eventData: EventData = {
@@ -176,8 +174,6 @@ export class KdbxEntryManager {
       // 标记数据库已修改
       this.markModified();
 
-      hilog.info(0, TAG, '条目更新成功: %{public}s', entry.uuid.id);
-
       // 触发事件
       if (this.onEvent) {
         const eventData: EventData = {
@@ -231,19 +227,11 @@ export class KdbxEntryManager {
 
       const inRecycle = this.isInRecycleBin(parentGroup);
 
-      hilog.info(0, TAG, '删除条目: %{public}s, 父组: %{public}s, 是否在回收站: %{public}s', 
-        entry.uuid.id, parentGroup.name || '未知', inRecycle ? '是' : '否');
-
       if (!inRecycle) {
-        // 软删除：移动到回收站
-        hilog.info(0, TAG, '执行软删除，移动到回收站');
         this.database.remove(entry);
       } else {
-        // 真正删除（仅限回收站内部）
-        hilog.info(0, TAG, '执行硬删除，直接删除条目');
         const entryIndex = parentGroup.entries.indexOf(entry);
         if (entryIndex === -1) {
-          hilog.error(0, TAG, '条目不在父组中，删除失败');
           return {
             success: false,
             error: '条目不在父组中',
@@ -251,13 +239,10 @@ export class KdbxEntryManager {
           };
         }
         parentGroup.entries.splice(entryIndex, 1);
-        hilog.info(0, TAG, '硬删除完成，已从父组中移除条目');
       }
 
       // 标记数据库已修改
       this.markModified();
-
-      hilog.info(0, TAG, '条目删除成功: %{public}s', entry.uuid.id);
 
       // 触发事件
       if (this.onEvent) {
@@ -336,8 +321,6 @@ export class KdbxEntryManager {
       if (entry.times) {
         entry.times.lastModTime = new Date();
       }
-
-      hilog.info(0, TAG, '条目移动成功: %{public}s', entry.uuid.id);
 
       // 触发事件
       if (this.onEvent) {
@@ -551,8 +534,6 @@ export class KdbxEntryManager {
         newEntry.times.lastModTime = now;
         newEntry.times.lastAccessTime = now;
       }
-
-      hilog.info(0, TAG, '条目复制成功: %{public}s', newEntry.uuid.id);
 
       // 触发事件
       if (this.onEvent) {
@@ -794,8 +775,6 @@ export class KdbxEntryManager {
       // 标记数据库已修改
       this.markModified();
 
-      hilog.info(0, TAG, '条目添加星标成功: %{public}s', entry.uuid.id);
-
       // 触发事件
       if (this.onEvent) {
         const eventData: EventData = {
@@ -859,8 +838,6 @@ export class KdbxEntryManager {
 
       // 标记数据库已修改
       this.markModified();
-
-      hilog.info(0, TAG, '条目移除星标成功: %{public}s', entry.uuid.id);
 
       // 触发事件
       if (this.onEvent) {

@@ -94,7 +94,8 @@ export class DatabaseCRUDTest {
    * 数据库事件监听器
    */
   private onDatabaseEvent(eventType: DatabaseEventType, data?: Record<string, Object>): void {
-    hilog.info(0, TAG, '数据库事件: %{public}s', eventType);
+    //hilog.info(0, TAG, '数据库事件: %{public}s', eventType);
+    return
   }
 
   /**
@@ -910,11 +911,11 @@ export class DatabaseCRUDTest {
       }
 
       // 检查根分组原始属性
-      hilog.info(0, TAG, '[%{public}s] 根分组原始属性:', stage);
-      hilog.info(0, TAG, '  名称: "%{public}s"', rootGroup.name || 'null');
-      hilog.info(0, TAG, '  UUID: %{public}s', rootGroup.uuid?.id || 'null');
-      hilog.info(0, TAG, '  子分组数量: %{public}d', rootGroup.groups?.length || 0);
-      hilog.info(0, TAG, '  条目数量: %{public}d', rootGroup.entries?.length || 0);
+      //hilog.info(0, TAG, '[%{public}s] 根分组原始属性:', stage);
+      //hilog.info(0, TAG, '  名称: "%{public}s"', rootGroup.name || 'null');
+      //hilog.info(0, TAG, '  UUID: %{public}s', rootGroup.uuid?.id || 'null');
+      //hilog.info(0, TAG, '  子分组数量: %{public}d', rootGroup.groups?.length || 0);
+      //hilog.info(0, TAG, '  条目数量: %{public}d', rootGroup.entries?.length || 0);
 
       // 递归检查所有分组的原始属性
       this.logGroupHierarchy(rootGroup, stage, 0);
@@ -931,16 +932,16 @@ export class DatabaseCRUDTest {
     const indent = '  '.repeat(depth + 1);
     
     // 记录当前分组
-    hilog.info(0, TAG, '[%{public}s] %{public}s分组: "%{public}s" (UUID: %{public}s)', 
-      stage, indent, group.name || 'null', group.uuid?.id || 'null');
+    //hilog.info(0, TAG, '[%{public}s] %{public}s分组: "%{public}s" (UUID: %{public}s)', 
+    //  stage, indent, group.name || 'null', group.uuid?.id || 'null');
     
     // 记录分组的条目
     if (group.entries && group.entries.length > 0) {
       for (let i = 0; i < group.entries.length; i++) {
         const entry = group.entries[i];
         const entryTitle = this.getEntryTitle(entry);
-        hilog.info(0, TAG, '[%{public}s] %{public}s  条目: "%{public}s" (UUID: %{public}s)', 
-          stage, indent, entryTitle || 'null', entry.uuid?.id || 'null');
+        //hilog.info(0, TAG, '[%{public}s] %{public}s  条目: "%{public}s" (UUID: %{public}s)', 
+        //  stage, indent, entryTitle || 'null', entry.uuid?.id || 'null');
       }
     }
 

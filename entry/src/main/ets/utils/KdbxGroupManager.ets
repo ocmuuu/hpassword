@@ -135,8 +135,6 @@ export class KdbxGroupManager {
         group.times.lastAccessTime = now;
       }
 
-      hilog.info(0, TAG, '组创建成功: %{public}s', params.name);
-
       // 触发事件
       if (this.onEvent) {
         const eventData: EventData = {
@@ -218,8 +216,6 @@ export class KdbxGroupManager {
         group.times.lastModTime = new Date();
       }
 
-      hilog.info(0, TAG, '组更新成功: %{public}s', group.uuid.id);
-
       // 触发事件
       if (this.onEvent) {
         const eventData: EventData = {
@@ -286,8 +282,6 @@ export class KdbxGroupManager {
         this.database.remove(group);
         this.markModified();
 
-        hilog.info(0, TAG, '组移动到回收站: %{public}s', group.uuid.id);
-
         if (this.onEvent) {
           const eventData: EventData = {
             groupId: group.uuid.id,
@@ -321,8 +315,6 @@ export class KdbxGroupManager {
       }
 
       parentGroup.groups.splice(groupIndex, 1);
-
-      hilog.info(0, TAG, '组删除成功: %{public}s', group.uuid.id);
 
       // 触发事件
       if (this.onEvent) {
@@ -390,9 +382,6 @@ export class KdbxGroupManager {
         this.database.remove(group);
         this.markModified();
 
-        hilog.info(0, TAG, '组递归移动到回收站: %{public}s (包含 %{public}d 个条目, %{public}d 个子组)',
-          group.uuid.id, stats.entries, stats.groups - 1);
-
         if (this.onEvent) {
           const eventData: EventData = {
             groupId: group.uuid.id,
@@ -423,9 +412,6 @@ export class KdbxGroupManager {
       }
 
       parentGroup.groups.splice(groupIndex, 1);
-
-      hilog.info(0, TAG, '组递归删除成功: %{public}s (包含 %{public}d 个条目, %{public}d 个子组)', 
-        group.uuid.id, stats.entries, stats.groups - 1);
 
       // 标记数据库已修改
       this.markModified();
@@ -539,8 +525,6 @@ export class KdbxGroupManager {
       if (group.times) {
         group.times.lastModTime = new Date();
       }
-
-      hilog.info(0, TAG, '组移动成功: %{public}s', group.uuid.id);
 
       // 触发事件
       if (this.onEvent) {
@@ -714,8 +698,6 @@ export class KdbxGroupManager {
         newGroup.times.lastModTime = now;
         newGroup.times.lastAccessTime = now;
       }
-
-      hilog.info(0, TAG, '组复制成功: %{public}s', newGroup.uuid.id);
 
       // 触发事件
       if (this.onEvent) {

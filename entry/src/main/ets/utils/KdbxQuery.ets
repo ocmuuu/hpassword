@@ -69,8 +69,6 @@ export class KdbxQuery {
 
       this.searchInGroup(rootGroup, criteria, results);
 
-      hilog.info(0, TAG, '搜索完成，找到 %{public}d 个结果', results.length);
-
       return {
         success: true,
         data: results
