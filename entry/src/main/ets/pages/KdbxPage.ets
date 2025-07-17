@@ -32,39 +32,37 @@ struct KdbxPage {
   private databaseFileManager: DatabaseFileManager | null = null
 
   // 查看/编辑状态
-  @State private isEditing: boolean = false // 编辑模式切换
-  @State private hoverFieldKey: string | null = null // 悬停字段，用于显示复制按钮
-  @State private showCopySuccessToast: boolean = false // 复制成功提示
+  @State private isEditing: boolean = false 
+  @State private hoverFieldKey: string | null = null 
+  @State private showCopySuccessToast: boolean = false 
   @State private successToastMessage: string = '复制成功'
 
   // 编辑状态
-  @State private editingName: string = '' // 编辑中的密码库名称
-  @State private editingPassword: string = '' // 编辑中的主密码
-  @State private confirmEditingPassword: string = '' // 确认编辑中的主密码
+  @State private editingName: string = '' 
+  @State private editingPassword: string = '' 
+  @State private confirmEditingPassword: string = '' 
 
   private copySuccessTimer: number | null = null
   private formErrorTimer: number | null = null
 
-  @State private isAddingDatabase: boolean = false // 是否正在添加新密码库
+  @State private isAddingDatabase: boolean = false 
   @State private newDbName: string = ''
   @State private newDbPath: string = ''
   @State private newPassword: string = ''
   @State private confirmPassword: string = ''
   @State private formError: string = ''
-  @State private showSwitchSuccessToast: boolean = false // 切换密码库成功提示
+  @State private showSwitchSuccessToast: boolean = false 
   @State private switchSuccessMessage: string = '切换密码库成功'
   
   // 双击检测相关
   private lastClickTime: number = 0
   private lastClickedId: string = ''
-  private readonly DOUBLE_CLICK_INTERVAL: number = 300 // 双击间隔时间(毫秒)
+  private readonly DOUBLE_CLICK_INTERVAL: number = 300 
 
   async aboutToAppear() {
     try {
-      // 获取应用上下文并初始化首选项
       const context = getContext(this) as Context
       
-      // 尝试使用同步方法初始化
       let initialized = PreferencesUtil.initSync(context)
       if (!initialized) {
         initialized = await PreferencesUtil.init(context)
@@ -76,15 +74,12 @@ struct KdbxPage {
         this.firstColumnWidth = layout.firstWidth
       }
       
-      // 初始化文件管理器
       this.databaseFileManager = new DatabaseFileManager(context)
       
-      // 初始化数据
       await this.initializeData()
       
       this.isInitialized = true
 
-      // 启动全局自动关闭计时器
       AutoCloseManager.getInstance().resume()
     } catch (error) {
       this.error = `初始化失败: ${error}`
@@ -93,7 +88,6 @@ struct KdbxPage {
   }
 
   aboutToDisappear() {
-    // 页面离开时暂停计时器
     AutoCloseManager.getInstance().pause()
   }
 
@@ -104,7 +98,6 @@ struct KdbxPage {
     try {
       this.isLoading = true
       
-      // 加载密码库列表
       await this.loadDatabaseList()
       
     } catch (error) {
@@ -123,7 +116,6 @@ struct KdbxPage {
         return
       }
 
-      // 优先从首选项读取密码库列表
       const listJson: string = PreferencesUtil.getKdbxDatabaseListSync();
       let storedList: DatabaseItem[] = [];
       try {
@@ -138,16 +130,13 @@ struct KdbxPage {
           try {
             let exists = false;
             
-            // 首先检查路径是否为空或无效
             if (!it.path || it.path.trim() === '') {
               exists = false;
             } else if (it.path.includes('/')) {
-              // 绝对路径，直接检查
               await fs.access(it.path);
               const stat = await fs.stat(it.path);
               exists = stat.size > 0;
             } else if (this.databaseFileManager) {
-              // 相对路径，通过 FileManager 检查
               exists = await this.databaseFileManager.fileExists(it.path);
             } else {
               exists = false;
@@ -162,20 +151,16 @@ struct KdbxPage {
         validOriginalList = storedList.filter((_, idx) => existenceArr[idx]);
       }
 
-      // 将原始数据转换为页面显示数据
       const context = getContext(this) as Context;
       this.databaseItems = validOriginalList.map(item => convertToDisplayItem(item, context));
 
-      // 同步首选项，去除无效项（保存原始数据）
       PreferencesUtil.saveKdbxDatabaseListSync(JSON.stringify(validOriginalList));
 
-      // 根据首选项恢复当前密码库选择
       const currentId: string = PreferencesUtil.getKdbxCurrentDatabaseIdSync();
       if (currentId) {
         const found = this.databaseItems.find(item => item.id === currentId);
         if (found) {
           this.selectedDatabaseId = found.id;
-          // 创建新的对象引用以确保 UI 更新
           this.selectedDatabase = {
             id: found.id,
             name: found.name,
@@ -200,11 +185,9 @@ struct KdbxPage {
   private onDatabaseItemClick(item: DisplayDatabaseItem) {
     const currentTime = Date.now()
     
-    // 检测双击
     if (this.lastClickedId === item.id && 
         currentTime - this.lastClickTime < this.DOUBLE_CLICK_INTERVAL) {
       
-      // 重置双击检测状态
       this.lastClickTime = 0
       this.lastClickedId = ''
       
@@ -212,16 +195,12 @@ struct KdbxPage {
       return
     }
     
-    // 更新双击检测状态
     this.lastClickTime = currentTime
     this.lastClickedId = item.id
     
-    // 延迟执行单击逻辑，避免与双击冲突
     setTimeout(() => {
-      // 检查是否在延迟期间发生了双击
       if (this.lastClickedId === item.id) {
         this.selectedDatabaseId = item.id
-        // 创建新的对象引用以确保 UI 更新
         this.selectedDatabase = {
           id: item.id,
           name: item.name,
@@ -244,27 +223,22 @@ struct KdbxPage {
     try {
         const currentId: string = PreferencesUtil.getKdbxCurrentDatabaseIdSync();
         
-        // 如果双击的就是当前密码库，不进行切换
         if (item.id === currentId) {
           return;
         }
         
-        // 关闭并清除当前 KdbxCore 实例，下次将用新密码重新打开
         const kdbxManager = KdbxCoreManager.getInstance();
         const currentCore = kdbxManager.getCurrentKdbxCore();
         if (currentCore) {
-        currentCore.close(); // 明确关闭数据库
-                  }
-          kdbxManager.clearCurrentKdbxCore(); // 清除实例引用
+          currentCore.close(); 
+        }
+        kdbxManager.clearCurrentKdbxCore(); 
                 
-          // 设置双击的密码库为当前密码库
-          PreferencesUtil.saveKdbxCurrentDatabaseIdSync(item.id);
+        PreferencesUtil.saveKdbxCurrentDatabaseIdSync(item.id);
         
-        // 显示切换成功提示
         this.switchSuccessMessage = `已切换到: ${item.name}`;
         this.showSwitchSuccessToast = true;
       
-      // 1秒后跳转回Index页面
       setTimeout(async () => {
         this.showSwitchSuccessToast = false;
         try {
@@ -273,7 +247,6 @@ struct KdbxPage {
           });
         } catch (routerError) {
           console.error('KdbxPage', '跳转失败:', routerError);
-          // 如果replaceUrl失败，尝试使用back
           await router.back();
         }
       }, 2000);
@@ -308,7 +281,6 @@ struct KdbxPage {
     try {
       await ClipboardUtil.copy(text)
 
-      // 清除旧定时器
       if (this.copySuccessTimer !== null) {
         clearTimeout(this.copySuccessTimer)
         this.copySuccessTimer = null
@@ -317,7 +289,6 @@ struct KdbxPage {
       this.successToastMessage = '复制成功'
       this.showCopySuccessToast = true
 
-      // 2.5s 后隐藏
       this.copySuccessTimer = setTimeout(() => {
         this.showCopySuccessToast = false
         this.copySuccessTimer = null
@@ -329,7 +300,6 @@ struct KdbxPage {
 
   /** 显示错误提示并自动隐藏 */
   private showFormError(message: string): void {
-    // 清除旧定时器
     if (this.formErrorTimer !== null) {
       clearTimeout(this.formErrorTimer)
       this.formErrorTimer = null
@@ -337,7 +307,6 @@ struct KdbxPage {
 
     this.formError = message
 
-    // 3s 后隐藏错误提示
     this.formErrorTimer = setTimeout(() => {
       this.formError = ''
       this.formErrorTimer = null
@@ -402,9 +371,7 @@ struct KdbxPage {
   private InfoPanelView() {
     if (this.selectedDatabase) {
       Column() {
-        // 详细信息字段
         Column() {
-          // 密码库名称
           Column() {
             Row() {
               Text('密码库名称')
@@ -454,7 +421,6 @@ struct KdbxPage {
             }
           })
 
-          // 密码库路径
           Column() {
             Row() {
               Text('密码库路径')
@@ -504,7 +470,6 @@ struct KdbxPage {
             }
           })
 
-          // 密码库文件名
           Column() {
             Row() {
               Text('密码库文件名')
@@ -554,7 +519,6 @@ struct KdbxPage {
             }
           })
 
-          // 最后修改
           Column() {
             Row() {
               Text('最后修改')
@@ -604,7 +568,6 @@ struct KdbxPage {
             }
           })
 
-          // 大小
           Column() {
             Row() {
               Text('大小')
@@ -665,7 +628,6 @@ struct KdbxPage {
       .height('100%')
       .justifyContent(FlexAlign.Start)
     } else {
-      // 与 EditPanelView 中的空状态保持一致
       Column() {
         Column() {
           Image($r('app.media.startIcon'))
@@ -751,10 +713,8 @@ struct KdbxPage {
   private EditPanelView() {
     if (this.selectedDatabase) {
       Column() {
-        // 编辑内容
         Scroll() {
           Column() {
-            // 编辑密码库
             Column() {
               Text('编辑密码库')
                 .fontSize(18)
@@ -762,7 +722,6 @@ struct KdbxPage {
                 .fontColor('#000')
                 .margin({ bottom: 16 })
 
-              // 密码库名称
               Column() {
                 Text('密码库名称')
                   .fontSize(16)
@@ -787,7 +746,6 @@ struct KdbxPage {
               .margin({ bottom: 16 })
               .alignItems(HorizontalAlign.Start)
 
-              // 新主密码（可选）
               Column() {
                 Text('新主密码（可选）')
                   .fontSize(16)
@@ -812,7 +770,6 @@ struct KdbxPage {
               .margin({ bottom: 16 })
               .alignItems(HorizontalAlign.Start)
 
-              // 确认主密码
               Column() {
                 Text('确认主密码')
                   .fontSize(16)
@@ -839,7 +796,6 @@ struct KdbxPage {
               .margin({ bottom: 16 })
               .alignItems(HorizontalAlign.Start)
 
-              // 说明文字
               Column() {
                 Text('说明')
                   .fontSize(16)
@@ -863,7 +819,6 @@ struct KdbxPage {
             .padding({ left: 20, right: 20, top: 16 })
             .alignItems(HorizontalAlign.Start)
 
-            // 操作按钮
             Row() {
               Button('保存')
                 .fontSize(14)
@@ -890,7 +845,6 @@ struct KdbxPage {
             .padding({ left: 20, right: 20, top: 16, bottom: 16 })
             .justifyContent(FlexAlign.Start)
 
-            // 占位符，撑满剩余空间
             Blank()
               .layoutWeight(1)
           }
@@ -903,7 +857,6 @@ struct KdbxPage {
       .width('100%')
       .height('100%')
     } else {
-      // 空状态
       Column() {
         Column() {
           Image($r('app.media.startIcon'))
@@ -932,9 +885,7 @@ struct KdbxPage {
     }
   }
 
-  // 创建新密码库（示例实现：创建空记录并保存列表）
   private async createNewDatabase() {
-    // 进入创建表单模式
     const defaultName: string = `我的密码库${this.databaseItems.length + 1}`;
     this.newDbName = defaultName;
     const defaultPath: string = `personal${this.databaseItems.length + 1}`;
@@ -971,15 +922,12 @@ struct KdbxPage {
       const fileNameOnly: string = this.newDbPath.trim();
       const finalPath: string = `${context.filesDir}/${fileNameOnly}`;
 
-      // 检查文件是否已经存在
       let fileExists = false;
       try {
         if (fileNameOnly.includes('/')) {
-          // 绝对路径，直接检查
           await fs.access(fileNameOnly);
           fileExists = true;
         } else {
-          // 相对路径（文件名），通过 DatabaseFileManager 检查
           if (this.databaseFileManager) {
             fileExists = await this.databaseFileManager.fileExists(fileNameOnly);
           }
@@ -991,10 +939,9 @@ struct KdbxPage {
         }
         
       } catch (error) {
-        // 如果检查失败，为了安全起见，继续创建流程
+        console.error('KdbxPage', '文件检测失败:', error);
       }
 
-      // 使用 KdbxCore 创建密码库并加入两条测试条目
       const core = new KdbxCore();
       const createResult = await core.createNew(this.newPassword, this.newDbName.trim());
       if (!createResult.success || !createResult.data) {
@@ -1016,7 +963,6 @@ struct KdbxPage {
         entry2.fields.set('Password', ProtectedValue.fromString('pass2'));
       }
 
-      // 保存密码库到文件
       const fileManager = new DatabaseFileManager(getContext(this) as Context);
       const saveRes = await fileManager.saveDatabaseToFile(db, fileNameOnly, true);
       if (!saveRes.success) {
@@ -1033,12 +979,11 @@ struct KdbxPage {
       const newOriginalItem: DatabaseItem = {
         id: newId,
         name: this.newDbName.trim(),
-        path: fileNameOnly,  // 保存相对路径（只是文件名），与现有检查逻辑保持一致
+        path: fileNameOnly,  
         lastModified: new Date().toISOString().split('T')[0],
         size: size
       };
 
-      // 获取现有的配置项列表并追加新密码库
       let currentOriginalList: DatabaseItem[] = [];
       try {
         const listJson = PreferencesUtil.getKdbxDatabaseListSync();
@@ -1047,20 +992,15 @@ struct KdbxPage {
         currentOriginalList = [];
       }
       
-      // 追加新密码库到配置项列表
       currentOriginalList.push(newOriginalItem);
       PreferencesUtil.saveKdbxDatabaseListSync(JSON.stringify(currentOriginalList));
 
-      // 转换为显示项目并更新页面显示列表  
       const ctxNew = getContext(this) as Context;
       const newDisplayItem = convertToDisplayItem(newOriginalItem, ctxNew);
       this.databaseItems.push(newDisplayItem);
-      // 不自动切换当前使用的密码库，保持原有的密码库不变
 
-      // 退出创建模式并选中新建的密码库（仅在界面上选中，不改变当前使用的密码库）
       this.isAddingDatabase = false;
       this.selectedDatabaseId = newId;
-      // 创建新的对象引用以确保 UI 更新
       this.selectedDatabase = {
         id: newDisplayItem.id,
         name: newDisplayItem.name,
@@ -1083,7 +1023,6 @@ struct KdbxPage {
     this.newPassword = '';
     this.confirmPassword = '';
     
-    // 清除错误提示和定时器
     if (this.formErrorTimer !== null) {
       clearTimeout(this.formErrorTimer);
       this.formErrorTimer = null;
@@ -1095,9 +1034,7 @@ struct KdbxPage {
   @Builder
   private CreateDatabaseFormView() {
     Column() {
-      // 表单内容
       Column() {
-        // 名称
         Column() {
           Text('密码库名称')
             .fontSize(16)
@@ -1118,7 +1055,6 @@ struct KdbxPage {
         .margin({ bottom: 16 })
         .alignItems(HorizontalAlign.Start)
 
-        // 路径
         Column() {
           Text('文件名或完整路径')
             .fontSize(16)
@@ -1139,7 +1075,6 @@ struct KdbxPage {
         .margin({ bottom: 16 })
         .alignItems(HorizontalAlign.Start)
 
-        // 密码
         Column() {
           Text('主密码')
             .fontSize(16)
@@ -1161,7 +1096,6 @@ struct KdbxPage {
         .margin({ bottom: 16 })
         .alignItems(HorizontalAlign.Start)
 
-        // 确认密码
         Column() {
           Text('确认密码')
             .fontSize(16)
@@ -1183,9 +1117,6 @@ struct KdbxPage {
         .margin({ bottom: 16 })
         .alignItems(HorizontalAlign.Start)
 
-        // 内联错误提示已移除，统一到底部Toast显示
-
-        // 按钮行
         Row() {
           Button('创建新的密码库')
             .width('30%')
@@ -1246,7 +1177,6 @@ struct KdbxPage {
     this.editingPassword = '';
     this.confirmEditingPassword = '';
     
-    // 清除错误提示
     if (this.formErrorTimer !== null) {
       clearTimeout(this.formErrorTimer);
       this.formErrorTimer = null;
@@ -1263,7 +1193,6 @@ struct KdbxPage {
     this.editingPassword = '';
     this.confirmEditingPassword = '';
     
-    // 清除错误提示
     if (this.formErrorTimer !== null) {
       clearTimeout(this.formErrorTimer);
       this.formErrorTimer = null;
@@ -1279,7 +1208,6 @@ struct KdbxPage {
       return;
     }
 
-    // 验证输入
     if (!this.editingName.trim()) {
       this.showFormError('密码库名称不能为空');
       return;
@@ -1290,7 +1218,6 @@ struct KdbxPage {
       return;
     }
 
-    // 如果设置了新密码，验证密码
     const hasNewPassword = this.editingPassword.trim() !== '';
     if (hasNewPassword) {
       if (this.editingPassword.length < 8) {
@@ -1305,7 +1232,6 @@ struct KdbxPage {
     }
 
     try {
-      // 获取当前密码库的原始数据
       const currentOriginalList: DatabaseItem[] = [];
       try {
         const listJson = PreferencesUtil.getKdbxDatabaseListSync();
@@ -1321,12 +1247,9 @@ struct KdbxPage {
         return;
       }
 
-      // 准备新的密码库名称
       const newName = this.editingName.trim();
 
-      // 如果需要修改主密码，重新保存数据库文件
       if (hasNewPassword) {
-        // 获取当前已经打开的密码库实例
         const currentKdbxCore = KdbxCoreManager.getInstance().getCurrentKdbxCore();
         if (!currentKdbxCore) {
           this.showFormError('当前没有打开的密码库实例');
@@ -1339,28 +1262,22 @@ struct KdbxPage {
           return;
         }
 
-        // 使用新密码创建新的凭据并保存
         if (!this.databaseFileManager) {
           this.showFormError('文件管理器未初始化');
           return;
         }
 
         try {
-          // 创建新的凭据
           const newCredentials = new KdbxCredentials(ProtectedValue.fromString(this.editingPassword));
           
-          // 等待凭据准备完成
           await newCredentials.ready;
           
-          // 修改数据库的凭据
           currentDb.credentials = newCredentials;
           
-          // 同时更新密码库内部的名称信息（如果有修改）
           if (currentDb.meta && currentDb.meta.name !== newName) {
             currentDb.meta.name = newName;
           }
           
-          // 保存数据库到文件
           const fileSaveResult = await this.databaseFileManager.saveDatabaseToFile(
             currentDb,
             currentItem.path,
@@ -1372,13 +1289,12 @@ struct KdbxPage {
             return;
           }
 
-          // 关闭并清除当前 KdbxCore 实例，下次将用新密码重新打开
           const kdbxManager = KdbxCoreManager.getInstance();
           const currentCore = kdbxManager.getCurrentKdbxCore();
           if (currentCore) {
-            currentCore.close(); // 明确关闭数据库
+            currentCore.close(); 
           }
-          kdbxManager.clearCurrentKdbxCore(); // 清除实例引用
+          kdbxManager.clearCurrentKdbxCore();
           
         } catch (error) {
           console.error('KdbxPage', '修改主密码失败:', error);
@@ -1386,16 +1302,12 @@ struct KdbxPage {
           return;
         }
         
-        // 修改密码成功后，更新配置项并跳转到 Index 页面
-        // 不更新UI，因为马上就要跳转重新打开了
         currentItem.name = newName;
         PreferencesUtil.saveKdbxDatabaseListSync(JSON.stringify(currentOriginalList));
         
-        // 显示成功提示并跳转
         this.successToastMessage = '密码库名称和主密码已更新，正在跳转...';
         this.showCopySuccessToast = true;
         
-        // 2秒后跳转到Index页面
         setTimeout(async () => {
           this.showCopySuccessToast = false;
           try {
@@ -1404,26 +1316,21 @@ struct KdbxPage {
             });
           } catch (routerError) {
             console.error('KdbxPage', '跳转失败:', routerError);
-            // 如果replaceUrl失败，尝试使用back
             await router.back();
           }
         }, 2000);
         
-        return; // 提前返回，不执行后续的普通保存逻辑
+        return; 
       }
 
-      // 以下是仅修改名称时的逻辑
-      // 更新密码库名称
       currentItem.name = newName;
       
-      // 同时更新密码库文件内部的名称信息
       const currentKdbxCore = KdbxCoreManager.getInstance().getCurrentKdbxCore();
       let needSaveDatabaseForNameChange = false;
       
       if (currentKdbxCore) {
         const currentDb = currentKdbxCore.getDatabase();
         if (currentDb && currentDb.meta) {
-          // 检查内部名称是否需要更新
           if (currentDb.meta.name !== newName) {
             currentDb.meta.name = newName;
             needSaveDatabaseForNameChange = true;
@@ -1431,7 +1338,6 @@ struct KdbxPage {
         }
       }
       
-      // 如果修改了内部名称，需要保存数据库文件
       if (needSaveDatabaseForNameChange) {
         if (this.databaseFileManager && currentKdbxCore) {
           const currentDb = currentKdbxCore.getDatabase();
@@ -1445,31 +1351,25 @@ struct KdbxPage {
               
               if (!nameUpdateResult.success) {
                 console.warn('KdbxPage', '更新密码库内部名称失败:', nameUpdateResult.error);
-                // 不阻止整个保存流程，只是记录警告
               }
             } catch (error) {
               console.warn('KdbxPage', '保存密码库内部名称时发生异常:', error);
-              // 不阻止整个保存流程，只是记录警告
             }
           }
         }
       }
       
-      // 更新配置项
       PreferencesUtil.saveKdbxDatabaseListSync(JSON.stringify(currentOriginalList));
 
-      // 仅修改名称时：更新页面显示数据，刷新第一栏密码库列表UI
       const ctxEdit = getContext(this) as Context;
       const updatedDisplayItem = convertToDisplayItem(currentItem, ctxEdit);
       const index = this.databaseItems.findIndex(item => item.id === this.selectedDatabase!.id);
       if (index !== -1) {
-        // 创建新的 DisplayDatabaseItem 数组以触发ArkUI响应式更新
         const newDatabaseItems = [...this.databaseItems];
         newDatabaseItems[index] = updatedDisplayItem;
         this.databaseItems = newDatabaseItems;
       }
 
-      // 更新选中的数据库对象
       this.selectedDatabase = {
         id: updatedDisplayItem.id,
         name: updatedDisplayItem.name,
@@ -1481,14 +1381,11 @@ struct KdbxPage {
         displaySize: updatedDisplayItem.displaySize
       };
 
-      // 退出编辑模式
       this.cancelEditMode();
 
-      // 显示成功提示（此时只可能是名称修改，密码修改已在前面处理并跳转）
       this.successToastMessage = '密码库名称已更新';
       this.showCopySuccessToast = true;
       
-      // 2.5秒后隐藏成功提示
       if (this.copySuccessTimer !== null) {
         clearTimeout(this.copySuccessTimer);
       }
@@ -1505,7 +1402,6 @@ struct KdbxPage {
 
   build() {
     if (!this.isInitialized) {
-      // 加载状态
       Column() {
         Text('正在初始化...')
           .fontSize(16)
@@ -1516,7 +1412,6 @@ struct KdbxPage {
       .justifyContent(FlexAlign.Center)
       .backgroundColor('#f5f5f5')
     } else if (this.error) {
-      // 错误状态
       Column() {
         Text(this.error)
           .fontSize(16)
@@ -1534,12 +1429,9 @@ struct KdbxPage {
       .justifyContent(FlexAlign.Center)
       .backgroundColor('#f5f5f5')
     } else {
-      // 主界面
       Row() {
-        // 第一栏：密码库列表
         if (!this.isFirstColumnCollapsed) {
           Column() {
-            // 密码库列表标题
             Row() {
               Image($r('app.media.down_arrow'))
                 .width(16)
@@ -1566,7 +1458,6 @@ struct KdbxPage {
                 .height(20)
                 .fillColor('#666')
                 .onClick(() => {
-                  // 直接回到 Index 页面
                   router.replaceUrl({
                     url: 'pages/Index'
                   })
@@ -1578,7 +1469,6 @@ struct KdbxPage {
             .backgroundColor('#f8f9fa')
             .border({ width: { bottom: 1 }, color: '#e0e0e0' })
 
-            // 密码库列表
             if (this.isLoading) {
               Column() {
                 LoadingProgress()
@@ -1614,12 +1504,10 @@ struct KdbxPage {
             } else {
               Scroll() {
                 Column() {
-                  // 密码库列表项
                   ForEach(this.databaseItems, (item: DisplayDatabaseItem) => {
                     Column() {
                       this.DatabaseItemView(item)
                       
-                      // 分割线
                       Divider()
                         .strokeWidth(0.8)
                         .color('#e0e0e0')
@@ -1627,7 +1515,6 @@ struct KdbxPage {
                     }
                   }, (item: DisplayDatabaseItem) => item.id)
 
-                  // 新增密码库按钮
                   Button() {
                     Row() {
                       Text('新增密码库')
@@ -1658,7 +1545,6 @@ struct KdbxPage {
               .align(Alignment.TopStart)
             }
             
-            // 切换密码库成功提示
             if (this.showSwitchSuccessToast) {
               Row() {
                 Image($r('app.media.success'))
@@ -1687,7 +1573,6 @@ struct KdbxPage {
           .backgroundColor('#f8f9fa')
           .transition(TransitionEffect.translate({ x: -this.firstColumnWidth }).animation({ duration: 300, curve: Curve.EaseInOut }))
 
-          // 分割线
           Divider()
             .vertical(true)
             .color('#e0e0e0')
@@ -1705,9 +1590,7 @@ struct KdbxPage {
             )
         }
 
-        // 第二栏：编辑面板
         Column() {
-          // 编辑面板顶部工具栏
           Row() {
             Text(this.isAddingDatabase ? '创建密码库' : 
                  (this.isEditing ? `编辑密码库: ${this.editingName || this.selectedDatabase?.name || ''}` : 
@@ -1743,7 +1626,6 @@ struct KdbxPage {
           .backgroundColor('#f8f9fa')
           .border({ width: { bottom: 1 }, color: '#e0e0e0' })
 
-          // 内容区域：根据状态切换显示
           Column() {
             if (this.isAddingDatabase) {
               this.CreateDatabaseFormView()
@@ -1758,7 +1640,6 @@ struct KdbxPage {
           .backgroundColor('#fff')
           .key(`content_panel_${this.selectedDatabase?.id || 'none'}_${this.isEditing ? 'edit' : 'view'}`)
 
-          // 复制成功提示（第二栏底部）
           if (this.formError) {
             Row() {
               Text(this.formError)

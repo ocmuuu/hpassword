@@ -51,33 +51,33 @@ struct MainPage {
   @State private databaseFileManager: DatabaseFileManager | null = null
   
   // 数据状态
-  @State private databaseName: string = '密码库'  // 数据库名称
+  @State private databaseName: string = '密码库'  
   @State private sidebarItems: SidebarItem[] = []
-  @State private fixedSidebarItems: SidebarItem[] = []  // 固定在上方的项目
-  @State private scrollableSidebarItems: SidebarItem[] = []  // 可滚动的项目
+  @State private fixedSidebarItems: SidebarItem[] = []  
+  @State private scrollableSidebarItems: SidebarItem[] = [] 
   @State private entryItems: EntryItem[] = []
   @State private selectedSidebarId: string | null = null
   @State private selectedEntryId: string | null = null
   @State private selectedEntry: EntryItem | null = null
-  @State private passwordVisible: Set<string> = new Set()  // 记录哪些密码字段是可见的
-  @State private sortedFields: string[] = []  // 排序后的字段键列表（保留备用）
-  @State private renderFields: RenderField[] = [] // 供 UI 直接渲染的字段数据
-  @State private updateCounter: number = 0 // 强制更新计数器
-  @State private hoverEntryId: string | null = null  // 鼠标悬停的条目ID
-  @State private hoverFieldKey: string | null = null  // 详情面板悬停字段Key
-  @State private showCopySuccessToast: boolean = false  // 复制成功提醒显示状态
-  @State private successToastMessage: string = '复制成功'  // 成功提醒消息
+  @State private passwordVisible: Set<string> = new Set()  
+  @State private sortedFields: string[] = []  
+  @State private renderFields: RenderField[] = [] 
+  @State private updateCounter: number = 0 
+  @State private hoverEntryId: string | null = null  
+  @State private hoverFieldKey: string | null = null  
+  @State private showCopySuccessToast: boolean = false  
+  @State private successToastMessage: string = '复制成功' 
   
   // 表单状态
-  @State private isAddingEntry: boolean = false  // 是否正在添加新条目
-  @State private isEditingEntry: boolean = false  // 是否正在编辑条目
-  @State private formData: Record<string, string> = {}  // 表单数据
-  @State private isSubmitting: boolean = false  // 是否正在提交表单
-  @State private validationError: string | null = null  // 表单验证错误
-  @State private selectedTemplate: CategoryTemplate = LoginTemplate  // 当前选定的模板
-  @State private availableTemplates: CategoryTemplate[] = TemplateManager.getAllTemplates()  // 所有可供选择的模板
-  @State private showTemplateDropdown: boolean = false  // 模板下拉框显示状态
-  @State private hoverTemplateName: string | null = null  // 下拉模板项 hover 状态
+  @State private isAddingEntry: boolean = false  
+  @State private isEditingEntry: boolean = false  
+  @State private formData: Record<string, string> = {}  
+  @State private isSubmitting: boolean = false  
+  @State private validationError: string | null = null 
+  @State private selectedTemplate: CategoryTemplate = LoginTemplate  
+  @State private availableTemplates: CategoryTemplate[] = TemplateManager.getAllTemplates() 
+  @State private showTemplateDropdown: boolean = false  
+  @State private hoverTemplateName: string | null = null  
   
   // 搜索状态（由 SearchHelper 管理）
   @State private searchState: SearchState = {
@@ -115,14 +115,12 @@ struct MainPage {
       }
       
       if (initialized) {
-        // 恢复布局状态
         const layout = await LayoutPreferencesUtil.restoreLayoutStates()
         this.isFirstColumnCollapsed = layout.collapsed
         this.firstColumnWidth = layout.firstWidth
         this.secondColumnWidth = layout.secondWidth
       }
       
-      // 从全局管理器获取KdbxCore实例
       const kdbxCore = KdbxCoreManager.getInstance().getCurrentKdbxCore()
       
       if (kdbxCore) {
@@ -453,7 +451,6 @@ struct MainPage {
               }
             })
 
-            // 编辑按钮
             Button() {
               Image($r('app.media.edit'))
                 .width(20)
@@ -471,7 +468,6 @@ struct MainPage {
             })
           }
 
-          // 删除按钮（回收站和非回收站都有，但功能不同）
           Button() {
             Image($r('app.media.trash'))
               .width(20)
@@ -598,7 +594,6 @@ struct MainPage {
       .backgroundColor('#f8f9fa')
       .border({ width: { bottom: 1 }, color: '#e0e0e0' })
 
-      // 空状态
       Column() {
         Column() {
           Image($r('app.media.startIcon'))
@@ -819,7 +814,6 @@ struct MainPage {
             }
           })
 
-        // 保存按钮
         Button(this.isSubmitting ? '保存中...' : '保存')
           .fontSize(14)
           .backgroundColor('#6FA8FF')
@@ -916,7 +910,6 @@ struct MainPage {
                     })
                     .onClick(() => {
                         this.selectedTemplate = tpl
-                        // 重新初始化表单数据
                         this.formData = {}
                         tpl.fields.forEach((f: FieldSpec) => {
                           this.formData[f.key] = ''

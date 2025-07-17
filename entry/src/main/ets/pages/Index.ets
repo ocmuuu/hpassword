@@ -8,6 +8,7 @@ import { runDatabaseCRUDTest } from '../test/DatabaseCRUDTest';
 import { KDF_ROUNDS_PRESETS, DEFAULT_KDF_ROUNDS, getSecurityLevelName, KdfRoundsPreset } from '../utils/KdbxConstants';
 import fs from '@ohos.file.fs';
 import PreferencesUtil from '../utils/PreferencesUtil'
+import { AutoCloseManager } from '../utils/AutoCloseManager'
 
 // 数据库列表项类型（与 KdbxPage 保持一致）
 interface DatabaseItem {
@@ -655,6 +656,8 @@ struct Index {
           this.password = value;
           this.clearError();
           this.checkCapsLockByText(value);
+          // 重置自动关闭计时器
+          AutoCloseManager.getInstance().reset();
         })
         .onSubmit(() => {
           this.openCurrentDatabase();
@@ -663,8 +666,8 @@ struct Index {
       
       // 大写锁定提示
       Row() {
-        Text('⚠️ 大写锁定已开启')
-          .fontSize(14)
+        Text('ℹ 大写锁定已开启')
+          .fontSize(15)
           .fontColor('#FF9800')
           .opacity(this.capsLockOn ? 1 : 0)
       }
@@ -727,16 +730,21 @@ struct Index {
   @Builder
   buildCreateForm() {
     Column() {
-      Text('创建主密码')
-        .fontSize(18)
-        .fontWeight(FontWeight.Medium)
-        .margin({ bottom: 10 })
-      
-      Text('首次使用，请设置主密码来创建默认密码库')
-        .fontSize(14)
-        .fontColor('#666666')
-        .textAlign(TextAlign.Center)
-        .margin({ bottom: 30 })
+      Row() {
+        Text('首次使用，请设置主密来码创建')
+          .fontSize(18)
+          .fontWeight(FontWeight.Medium)
+          .fontColor('#333333')
+        
+        Text('默认密码库')
+          .fontSize(18)
+          .fontWeight(FontWeight.Bold)
+          .fontColor('#1976D2')
+      }
+      .margin({ bottom: 30 })
+      .width('100%')
+      .justifyContent(FlexAlign.Center)
+      .alignItems(VerticalAlign.Center)
       
       // 密码输入框
       TextInput({ placeholder: '请输入主密码（至少8位）' })
@@ -751,6 +759,7 @@ struct Index {
           this.password = value;
           this.clearError();
           this.checkCapsLockByText(value);
+          AutoCloseManager.getInstance().reset();
         })
         .margin({ bottom: 10 })
       
@@ -767,16 +776,17 @@ struct Index {
           this.confirmPassword = value;
           this.clearError();
           this.checkCapsLockByText(value);
+
+          AutoCloseManager.getInstance().reset();
         })
         .onSubmit(() => {
           this.createDefaultDatabase();
         })
         .margin({ bottom: 10 })
 
-      // 大写锁定提示
       Row() {
-        Text('⚠️ 大写锁定已开启')
-          .fontSize(14)
+        Text('ℹ 大写锁定已开启')
+          .fontSize(15)
           .fontColor('#FF9800')
           .opacity(this.capsLockOn ? 1 : 0)
       }
