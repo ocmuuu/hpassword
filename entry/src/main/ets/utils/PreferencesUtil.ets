@@ -62,6 +62,17 @@ export default class PreferencesUtil {
   }
   // endregion
 
+  static getLastActiveTimeSync(): number {
+    return PreferencesUtil.dataPreferences?.getSync('last_active_time', 0) as number ?? 0
+  }
+
+  static saveLastActiveTimeSync(time: number): void {
+    if (PreferencesUtil.dataPreferences) {
+      PreferencesUtil.dataPreferences.putSync('last_active_time', time)
+      PreferencesUtil.dataPreferences.flush()
+    }
+  }
+
   // region Setter
   static saveSelectedKdbxSidebarIdSync(id: string): void {
     if (PreferencesUtil.dataPreferences) {

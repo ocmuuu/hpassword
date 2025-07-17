@@ -2,6 +2,7 @@ import router from '@ohos.router'
 import { DatabaseFileManager } from '../utils/DatabaseFileManager'
 import PreferencesUtil from '../utils/PreferencesUtil'
 import { LayoutPreferencesUtil } from '../utils/LayoutPreferencesUtil'
+import { AutoCloseManager } from '../utils/AutoCloseManager'
 import fs from '@ohos.file.fs'
 import DirtyFlag from '../utils/DirtyFlag'
 import { KdbxCore, KdbxCoreManager } from '../utils/KdbxCore'
@@ -82,10 +83,18 @@ struct KdbxPage {
       await this.initializeData()
       
       this.isInitialized = true
+
+      // 启动全局自动关闭计时器
+      AutoCloseManager.getInstance().resume()
     } catch (error) {
       this.error = `初始化失败: ${error}`
       this.isInitialized = true
     }
+  }
+
+  aboutToDisappear() {
+    // 页面离开时暂停计时器
+    AutoCloseManager.getInstance().pause()
   }
 
   /**

@@ -1,5 +1,6 @@
 import router from '@ohos.router'
 import { LayoutPreferencesUtil } from '../utils/LayoutPreferencesUtil'
+import { AutoCloseManager } from '../utils/AutoCloseManager'
 
 import HelpItemModel from '../helps/HelpItemModel'
 import { helpItems as allHelps } from '../helps/index'
@@ -18,9 +19,16 @@ struct HelpPage {
       if (layout.firstWidth >= 200 && layout.firstWidth <= 300) {
         this.firstColumnWidth = layout.firstWidth
       }
+      // 启动全局自动关闭计时器
+      AutoCloseManager.getInstance().resume()
     } catch (error) {
       console.error('HelpPage', '读取列宽失败:', error)
     }
+  }
+
+  aboutToDisappear() {
+    // 页面离开时暂停计时器
+    AutoCloseManager.getInstance().pause()
   }
 
   build() {

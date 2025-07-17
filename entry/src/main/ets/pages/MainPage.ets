@@ -19,6 +19,7 @@ import { EntryService } from '../utils/EntryService'
 import { DatabaseFileService } from '../utils/DatabaseFileService'
 import { ClipboardUtil } from '../utils/ClipboardUtil'
 import { MainPageDataService } from '../utils/MainPageDataService'
+import { AutoCloseManager } from '../utils/AutoCloseManager'
 
 // 密码库项目类型（配置项中的原始数据）
 interface DatabaseItem {
@@ -98,10 +99,6 @@ struct MainPage {
   @State private isLoading: boolean = false
   @State private error: string | null = null
   
-  // 自动超时相关
-  private autoCloseTimer: number | null = null
-  private readonly AUTO_CLOSE_TIMEOUT = 600000  // 10分钟自动关闭
-  
   // 复制成功提醒定时器
   private copySuccessTimer: number | null = null
   
@@ -155,7 +152,7 @@ struct MainPage {
       
       this.isInitialized = true
 
-      this.startAutoCloseTimer()
+      AutoCloseManager.getInstance().init(() => this.autoCloseDatabase())
     } catch (error) {
       this.error = `初始化失败: ${error}`
       this.isInitialized = true
@@ -212,7 +209,7 @@ struct MainPage {
    * 侧边栏项目点击处理
    */
   private async onSidebarItemClick(item: SidebarItem) {
-    this.resetAutoCloseTimer()
+    AutoCloseManager.getInstance().reset()
     
     if (item.type === 'divider') {
       return
@@ -235,7 +232,7 @@ struct MainPage {
    */
   private onEntryItemClick(entry: EntryItem) {
     try {
-      this.resetAutoCloseTimer()
+      AutoCloseManager.getInstance().reset()
       this.updateSelectedEntry(entry)
       
       if (this.searchState.isSearching) {
@@ -303,22 +300,10 @@ struct MainPage {
   }
 
   /**
-   * 强制UI刷新的辅助方法
-   */
-  private forceUIRefresh() {
-    const temp = this.selectedEntry
-    this.selectedEntry = null
-    setTimeout(() => {
-      this.selectedEntry = temp
-    }, 1)
-  }
-
-  /**
    * 切换第一栏折叠状态
    */
   private onToggleFirstColumn() {
-    // 重置自动关闭计时器
-    this.resetAutoCloseTimer()
+    AutoCloseManager.getInstance().reset()
     
     this.isFirstColumnCollapsed = !this.isFirstColumnCollapsed
     
@@ -329,16 +314,15 @@ struct MainPage {
    * 返回首页：保存并关闭数据库，跳转到 Index 页面并重置密码输入
    */
   private async onBackToHome() {
-    // 清除自动关闭计时器（用户主动返回）
-    this.clearAutoCloseTimer()
-    
+    AutoCloseManager.getInstance().clear()
+
     await DatabaseFileService.returnToIndex(this.kdbxCore, this.databaseFileManager)
   }
 
   /**
    * 创建侧边栏项目视图
    */
-    @Builder
+  @Builder
   private SidebarItemView(item: SidebarItem) {
     if (item.type === 'divider') {
       Divider()
@@ -377,7 +361,6 @@ struct MainPage {
   @Builder
   private EntryItemView(entry: EntryItem) {
     Row() {
-      // 在回收站时不显示图标
       if (!this.isInRecycleBin()) {
         Image(entry.icon)
           .width(20)
@@ -430,7 +413,6 @@ struct MainPage {
       this.AddFormView()
     } else if (this.selectedEntry) {
       Column() {
-                  // 标题栏
           Row() {
             Text(this.selectedEntry.title + (this.updateCounter > 0 ? '' : ''))
               .fontSize(20)
@@ -440,11 +422,7 @@ struct MainPage {
               .maxLines(1)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
 
-          // 根据当前视图显示不同的按钮
           if (!this.isInRecycleBin()) {
-            // 非回收站视图：显示加星、编辑、删除按钮
-            
-            // 加星/取消加星按钮
             Button() {
               Image(EntryService.isEntryStarred(this.selectedEntry) ? $r('app.media.star') : $r('app.media.unstar'))
                 .width(20)
@@ -456,20 +434,16 @@ struct MainPage {
             .margin({ right: 4 })
             .stateEffect(false)
             .onClick(async () => {
-              // 重置自动关闭计时器
-              this.resetAutoCloseTimer()
+              AutoCloseManager.getInstance().reset()
               
               if (this.selectedEntry && this.kdbxEntryManager) {
                 const kdbxEntry: ESObject | null = await this.getKdbxEntryById(this.selectedEntry.id);
                 if (kdbxEntry) {
                   const result = this.kdbxEntryManager.toggleEntryStarred(kdbxEntry);
                   if (result.success) {
-                    // 保存数据库到文件
                     await DatabaseFileService.saveDatabaseToFile(this.kdbxCore, this.databaseFileManager);
                     
-                    // 刷新列表
                     await this.loadEntriesForSidebar(this.selectedSidebarId || 'all_entries');
-                    // 更新选中项
                     const updatedSelectedEntry = this.entryItems.find(item => item.id === this.selectedEntry?.id);
                     if (updatedSelectedEntry) {
                       this.updateSelectedEntry(updatedSelectedEntry);
@@ -491,10 +465,8 @@ struct MainPage {
             .stateEffect(false)
             .margin({ right: 4 })
             .onClick(() => {
-              // 重置自动关闭计时器
-              this.resetAutoCloseTimer()
-              
-              // 显示编辑表单
+              AutoCloseManager.getInstance().reset()
+
               this.showEditForm()
             })
           }
@@ -510,14 +482,12 @@ struct MainPage {
           .padding(4)
           .stateEffect(false)
           .onClick(async () => {
-            // 重置自动关闭计时器
-            this.resetAutoCloseTimer()
+            AutoCloseManager.getInstance().reset()
             
             if (!this.selectedEntry || !this.kdbxEntryManager) {
               return
             }
 
-            // 获取原始 KdbxEntry
             const kdbxEntry: ESObject | null = await this.getKdbxEntryById(this.selectedEntry.id)
             if (!kdbxEntry) {
               return
@@ -528,13 +498,10 @@ struct MainPage {
             if (delResult.success) {
               await DatabaseFileService.saveDatabaseToFile(this.kdbxCore, this.databaseFileManager);
 
-              // 重新构建侧边栏数据（更新计数）
               await this.initializeSidebarItems()
 
-              // 刷新当前列表
               await this.loadEntriesForSidebar(this.selectedSidebarId || 'all_entries')
 
-              // 清空详情选择
               this.selectedEntry = null
               this.selectedEntryId = null
               console.log('MainPage', 'UI更新完成')
@@ -543,7 +510,6 @@ struct MainPage {
             }
           })
 
-          // Help 信息按钮
           Button() {
             Image($r('app.media.information'))
               .width(20)
@@ -565,15 +531,12 @@ struct MainPage {
         .backgroundColor('#f8f9fa')
         .border({ width: { bottom: 1 }, color: '#e0e0e0' })
 
-        // 详情内容
         Scroll() {
           Column() {
-            // 动态显示所有字段
             ForEach(this.renderFields, (field: RenderField) => {
               this.RenderFieldItem(field)
             }, (field: RenderField) => field.key + '_' + this.updateCounter)
 
-            // 占位符，撑满剩余空间，确保内容靠顶部显示
             Blank()
               .layoutWeight(1)
           }
@@ -584,7 +547,6 @@ struct MainPage {
         .layoutWeight(1)
         .backgroundColor('#fff')
         
-        // 复制成功提醒
         if (this.showCopySuccessToast) {
           Row() {
             Image($r('app.media.success'))
@@ -611,7 +573,6 @@ struct MainPage {
       .width('100%')
       .height('100%')
     } else {
-      // 顶部栏：显示数据库管理和帮助按钮
       Row() {
         Blank()
           .layoutWeight(1)
@@ -661,7 +622,6 @@ struct MainPage {
         .justifyContent(FlexAlign.Start)
         .padding({ top: 60 })
         
-        // 复制成功提醒
         if (this.showCopySuccessToast) {
           Row() {
             Image($r('app.media.information'))
@@ -719,10 +679,8 @@ struct MainPage {
           .padding({ left: 8, right: 8, top: 2, bottom: 2 })
           .opacity(this.hoverFieldKey === label ? 1 : 0)
           .onClick(() => {
-            // 重置自动关闭计时器
-            this.resetAutoCloseTimer()
+            AutoCloseManager.getInstance().reset()
             
-            // 复制文本到剪贴板
             this.copyToClipboard(value)
           })
       }
@@ -742,7 +700,7 @@ struct MainPage {
     .width('100%')
     .alignItems(HorizontalAlign.Start)
     .onClick(() => {
-      this.resetAutoCloseTimer();
+      AutoCloseManager.getInstance().reset();
       this.copyToClipboard(value);
     })
   }
@@ -776,10 +734,8 @@ struct MainPage {
           .padding({ left: 6, right: 6, top: 2, bottom: 2 })
           .opacity(this.hoverFieldKey === fieldKey ? 1 : 0)
           .onClick(() => {
-            // 重置自动关闭计时器
-            this.resetAutoCloseTimer()
+            AutoCloseManager.getInstance().reset()
             
-            // 复制文本到剪贴板
             this.copyToClipboard(value)
           })
 
@@ -790,15 +746,13 @@ struct MainPage {
           .padding({ left: 6, right: 6, top: 4, bottom: 4 })
           .opacity(this.hoverFieldKey === fieldKey ? 1 : 0)
           .onClick(() => {
-            // 重置自动关闭计时器
-            this.resetAutoCloseTimer()
+            AutoCloseManager.getInstance().reset()
             
             if (this.passwordVisible.has(fieldKey)) {
               this.passwordVisible.delete(fieldKey);
             } else {
               this.passwordVisible.add(fieldKey);
             }
-            // 触发状态更新
             this.passwordVisible = new Set(this.passwordVisible);
           })
       }
@@ -818,7 +772,7 @@ struct MainPage {
     .width('100%')
     .alignItems(HorizontalAlign.Start)
     .onClick(() => {
-      this.resetAutoCloseTimer();
+      AutoCloseManager.getInstance().reset();
       this.copyToClipboard(value);
     })
   }
@@ -841,7 +795,6 @@ struct MainPage {
   @Builder
   private AddFormView() {
     Column() {
-      // 标题栏
       Row() {
         Text(`${this.isEditingEntry ? '编辑' : '新建'}${this.selectedTemplate.name}条目`)
           .fontSize(20)
@@ -849,7 +802,6 @@ struct MainPage {
           .fontColor('#000')
           .layoutWeight(1)
 
-        // 取消按钮
         Button('取消')
           .fontSize(14)
           .backgroundColor('#f0f0f0')
@@ -891,14 +843,11 @@ struct MainPage {
       .backgroundColor('#f8f9fa')
       .border({ width: { bottom: 1 }, color: '#e0e0e0' })
 
-      // 表单内容
       Scroll() {
         Column() {
-          // 模板选择区域
           Column() {
             Row() {
 
-              // 模板选择区域（编辑模式下仅展示，不可点击）
               Button() {
                 Row() {
                   Image(EntryConverter.getTemplateIcon(this.selectedTemplate.name))
@@ -991,16 +940,13 @@ struct MainPage {
           .margin({ bottom: 8 })
           .alignItems(HorizontalAlign.Start)
 
-          // 分割线
           Divider()
             .strokeWidth(1)
             .color('#e0e0e0')
             .margin({ top: 4, bottom: 16 })
 
-          // 根据模板动态生成表单字段
           ForEach(this.selectedTemplate.fields, (field: FieldSpec) => {
             Column() {
-              // 字段标签
               Row() {
                 Text(field.label)
                   .fontSize(16)
@@ -1008,7 +954,6 @@ struct MainPage {
                   .fontWeight(FontWeight.Medium)
                   .margin({ bottom: 8 })
 
-                // 必填标记
                 if (field.key === 'Title' || field.key === 'UserName' || field.key === 'Password') {
                   Text('*')
                     .fontSize(16)
@@ -1019,9 +964,7 @@ struct MainPage {
               .width('100%')
               .alignItems(VerticalAlign.Center)
 
-              // 输入框
               if (field.key === 'Notes') {
-                // 备注使用多行输入
                 TextArea({ 
                   placeholder: `请输入${field.label}`,
                   text: this.formData[field.key] || ''
@@ -1035,7 +978,6 @@ struct MainPage {
                     this.formData[field.key] = value
                   })
               } else {
-                // 其他字段使用单行输入
                 TextInput({ 
                   placeholder: `请输入${field.label}`,
                   text: this.formData[field.key] || ''
@@ -1055,7 +997,6 @@ struct MainPage {
             .alignItems(HorizontalAlign.Start)
           }, (field: FieldSpec) => field.key)
 
-          // 占位符，撑满剩余空间
           Blank()
             .layoutWeight(1)
         }
@@ -1066,7 +1007,6 @@ struct MainPage {
       .layoutWeight(1)
       .backgroundColor('#fff')
       
-      // 验证错误提醒
       if (this.validationError) {
         Row() {
           Image($r('app.media.information'))
@@ -1122,17 +1062,14 @@ struct MainPage {
     try {
       await ClipboardUtil.copy(text)
       
-      // 清除之前的定时器
       if (this.copySuccessTimer !== null) {
         clearTimeout(this.copySuccessTimer)
         this.copySuccessTimer = null
       }
       
-      // 显示复制成功提醒
       this.successToastMessage = '复制成功'
       this.showCopySuccessToast = true
       
-      // 2.5秒后自动隐藏提醒
       this.copySuccessTimer = setTimeout(() => {
         this.showCopySuccessToast = false
         this.copySuccessTimer = null
@@ -1146,13 +1083,11 @@ struct MainPage {
    * 显示添加表单
    */
   private showAddForm() {
-    // 在添加模式时关闭编辑模式
     this.isEditingEntry = false
     this.isAddingEntry = true
     this.selectedEntry = null
     this.selectedEntryId = null
 
-    // 根据当前侧边栏选中组，动态选择模板
     let templateToUse: CategoryTemplate = LoginTemplate
     const sidebarItem = this.sidebarItems.find(item => item.id === this.selectedSidebarId)
     if (sidebarItem && sidebarItem.type === 'group') {
@@ -1161,16 +1096,14 @@ struct MainPage {
         templateToUse = matched
       }
     }
-    // 如果不是系统模板组，则保持登录密码模板
+
     this.selectedTemplate = templateToUse
 
-    // 初始化表单数据
     this.formData = {}
     this.selectedTemplate.fields.forEach((field: FieldSpec) => {
       this.formData[field.key] = ''
     })
 
-    // 回收站中禁用新建
     if (this.isInRecycleBin()) {
       this.showValidationError('回收站中无法新建条目')
       return
@@ -1184,7 +1117,6 @@ struct MainPage {
     this.isAddingEntry = false
     this.formData = {}
     this.validationError = null
-    // 清除验证错误定时器
     if (this.validationErrorTimer !== null) {
       clearTimeout(this.validationErrorTimer)
       this.validationErrorTimer = null
@@ -1202,11 +1134,9 @@ struct MainPage {
     this.isEditingEntry = true
     this.isAddingEntry = false
 
-    // 根据组名匹配模板
     const tpl: CategoryTemplate | null = TemplateManager.getTemplateByGroupName(this.selectedEntry.groupName || '') ?? null
     this.selectedTemplate = tpl ? tpl : LoginTemplate
 
-    // 初始化表单数据为当前条目值
     this.formData = {}
     this.selectedTemplate.fields.forEach((field: FieldSpec) => {
       switch (field.key) {
@@ -1248,16 +1178,13 @@ struct MainPage {
    * 显示验证错误提醒
    */
   private showValidationError(message: string) {
-    // 清除之前的定时器
     if (this.validationErrorTimer !== null) {
       clearTimeout(this.validationErrorTimer)
       this.validationErrorTimer = null
     }
     
-    // 显示错误提醒
     this.validationError = message
     
-    // 3秒后自动隐藏提醒
     this.validationErrorTimer = setTimeout(() => {
       this.validationError = null
       this.validationErrorTimer = null
@@ -1273,8 +1200,6 @@ struct MainPage {
       return
     }
 
-    // 根据当前模板动态验证必填字段
-    // 基础必填字段：若模板包含 Title 则用 Title，否则取第一个字段
     const titleKey = this.selectedTemplate.fields.some(f => f.key === 'Title') ? 'Title' : this.selectedTemplate.fields[0]?.key
     const baseRequired: string[] = titleKey ? [titleKey] : []
     const extraRequired: string[] = ['UserName', 'Password']
@@ -1285,7 +1210,6 @@ struct MainPage {
     const missingKeys: string[] = requiredKeys.filter(key => !this.formData[key])
 
     if (missingKeys.length > 0) {
-      // 获取缺失字段对应的中文标签
       const missingLabels = this.selectedTemplate.fields
         .filter(f => missingKeys.includes(f.key))
         .map(f => f.label || f.key)
@@ -1299,14 +1223,12 @@ struct MainPage {
     this.isSubmitting = true
 
     try {
-      // 1. 优先根据模板名称匹配系统模板分组
       let targetGroup: ESObject | undefined = undefined
       const allGroupsResult = await this.kdbxQuery?.getAllGroups()
       if (allGroupsResult?.success && allGroupsResult.data) {
         targetGroup = allGroupsResult.data.find((g: ESObject) => (g.name as string) === this.selectedTemplate.name)
       }
 
-      // 2. 若未找到模板对应组，则按侧边栏选中项或默认逻辑
       if (!targetGroup) {
         let groupId = this.selectedSidebarId
         if (!groupId || groupId === 'all_entries' || groupId === 'starred') {
@@ -1323,12 +1245,9 @@ struct MainPage {
         }
       }
 
-      // 3. 如果仍未找到目标组，则创建以模板名称命名的新组
       if (!targetGroup && this.kdbxGroupManager) {
-        // 获取默认的父组（根组）
         const defaultGroup = this.kdbxCore?.getDatabase()?.getDefaultGroup()
         
-        // 创建新组
         const createGroupResult = this.kdbxGroupManager.createGroup({
           name: this.selectedTemplate.name,
           notes: `自动创建的${this.selectedTemplate.name}模板组`,
@@ -1343,7 +1262,6 @@ struct MainPage {
         }
       }
 
-      // 生成标题：若模板无 Title 字段，则使用首字段内容
       const titleValue: string = this.formData[titleKey] || ''
 
       const createParams: EntryCreateParams = {
@@ -1354,12 +1272,11 @@ struct MainPage {
         notes: this.formData['Notes'] || '',
         template: this.selectedTemplate
       }
-      // 设置 parentGroup
+
       if (targetGroup) {
         createParams.parentGroup = targetGroup
       }
 
-      // 添加自定义字段
       const customFields = new Map<string, string>()
       this.selectedTemplate.fields.forEach((f: FieldSpec) => {
         if (!['Title', 'UserName', 'Password', 'URL', 'Notes'].includes(f.key)) {
@@ -1372,33 +1289,26 @@ struct MainPage {
         createParams.customFields = customFields
       }
 
-      // 创建新条目
       const createResult = this.kdbxEntryManager.createEntry(createParams)
 
       if (createResult.success && createResult.data) {
 
-        // 保存到文件
         await DatabaseFileService.saveDatabaseToFile(this.kdbxCore, this.databaseFileManager);
 
-        // 新建条目 ID
         const newEntryId = ((createResult.data.uuid as ESObject).id) as string
 
-        // 刷新界面
         await this.initializeSidebarItems()
         await this.loadEntriesForSidebar(this.selectedSidebarId || 'all_entries')
 
-        // 定位并选中新建的条目
         const createdItem = this.entryItems.find(item => item.id === newEntryId)
         if (createdItem) {
           this.updateSelectedEntry(createdItem)
         }
 
-        // 隐藏表单
         this.hideAddForm()
 
         console.log('MainPage', '条目创建成功')
         
-        // 显示成功提醒
         this.successToastMessage = '创建成功'
         this.showCopySuccessToast = true
         if (this.copySuccessTimer !== null) {
@@ -1428,7 +1338,6 @@ struct MainPage {
       return
     }
 
-    // 验证必填字段（与新增逻辑一致）
     const titleKey = this.selectedTemplate.fields.some(f => f.key === 'Title') ? 'Title' : this.selectedTemplate.fields[0]?.key
     const baseRequired: string[] = titleKey ? [titleKey] : []
     const extraRequired: string[] = ['UserName', 'Password']
@@ -1467,7 +1376,6 @@ struct MainPage {
       if (this.formData['URL'] !== undefined) updateParams.url = this.formData['URL']
       if (this.formData['Notes'] !== undefined) updateParams.notes = this.formData['Notes']
 
-      // 自定义字段
       const customFields = new Map<string, string>()
       this.selectedTemplate.fields.forEach((f: FieldSpec) => {
         if (!['Title', 'UserName', 'Password', 'URL', 'Notes'].includes(f.key)) {
@@ -1483,20 +1391,17 @@ struct MainPage {
       const result = this.kdbxEntryManager.updateEntry(kdbxEntry as ESObject, updateParams)
 
       if (result.success) {
-        // 保存
+
         await DatabaseFileService.saveDatabaseToFile(this.kdbxCore, this.databaseFileManager);
 
-        // 刷新列表和详情
         await this.loadEntriesForSidebar(this.selectedSidebarId || 'all_entries')
         const updated = this.entryItems.find(item => item.id === this.selectedEntry?.id)
         if (updated) {
           this.updateSelectedEntry(updated)
         }
 
-        // 隐藏表单
         this.hideEditForm()
 
-        // 成功提示
         this.successToastMessage = '更新成功'
         this.showCopySuccessToast = true
         if (this.copySuccessTimer !== null) {
@@ -1519,7 +1424,6 @@ struct MainPage {
 
   build() {
     if (!this.isInitialized) {
-      // 加载状态
       Column() {
         Text('正在初始化...')
           .fontSize(16)
@@ -1530,7 +1434,6 @@ struct MainPage {
       .justifyContent(FlexAlign.Center)
       .backgroundColor('#f5f5f5')
     } else if (this.error) {
-      // 错误状态
       Column() {
         Text(this.error)
           .fontSize(16)
@@ -1548,12 +1451,9 @@ struct MainPage {
       .justifyContent(FlexAlign.Center)
       .backgroundColor('#f5f5f5')
     } else {
-      // 主界面
       Row() {
-        // 第一栏：侧边栏
         if (!this.isFirstColumnCollapsed) {
           Column() {
-            // 侧边栏标题
             Row() {
               Image($r('app.media.right_arrow'))
                 .width(16)
@@ -1597,9 +1497,7 @@ struct MainPage {
             .backgroundColor('#f8f9fa')
             .border({ width: { bottom: 1 }, color: '#e0e0e0' })
 
-            // 侧边栏内容
             Column() {
-              // 固定区域：所有条目、加星条目、分割线
               Column() {
                 ForEach(this.fixedSidebarItems, (item: SidebarItem) => {
                   Column() {
@@ -1616,7 +1514,6 @@ struct MainPage {
               .width('100%')
               .backgroundColor('#fff')
               
-              // 可滚动区域：分类组和回收站
               List() {
                 ForEach(this.scrollableSidebarItems, (item: SidebarItem) => {
                   ListItem() {
@@ -1641,7 +1538,6 @@ struct MainPage {
           .backgroundColor('#f8f9fa')
           .transition(TransitionEffect.translate({ x: -this.firstColumnWidth }).animation({ duration: 300, curve: Curve.EaseInOut }))
 
-          // 分割线
           Divider()
             .vertical(true)
             .color('#e0e0e0')
@@ -1649,8 +1545,7 @@ struct MainPage {
             .gesture(
               PanGesture({ direction: PanDirection.Horizontal, fingers: 1 })
                 .onActionStart(() => {
-                  // 重置自动关闭计时器
-                  this.resetAutoCloseTimer()
+                  AutoCloseManager.getInstance().reset()
                 })
                 .onActionUpdate((event: GestureEvent) => {
                   let newFirstWidth = this.firstColumnWidth + event.offsetX
@@ -1663,11 +1558,8 @@ struct MainPage {
             )
         }
 
-        // 第二栏：条目列表
         Column() {
-          // 条目列表顶部工具栏
           Row() {
-            // 折叠/展开按钮
             Image(this.isFirstColumnCollapsed ? $r('app.media.show') : $r('app.media.hide'))
               .width(20)
               .height(20)
@@ -1676,7 +1568,6 @@ struct MainPage {
                 this.onToggleFirstColumn()
               })
 
-            // 搜索框容器
             Row() {
               TextInput({ placeholder: '搜索条目', text: this.searchState.query })
                 .placeholderColor('#999')
@@ -1686,16 +1577,13 @@ struct MainPage {
                 .padding({ left: 8, right: 8, top: 4, bottom: 4 })
                 .layoutWeight(1)
                 .onChange((value: string) => {
-                  // 重置自动关闭计时器
-                  this.resetAutoCloseTimer()
+                  AutoCloseManager.getInstance().reset()
                   
-                  // 使用搜索助手进行防抖搜索
                   if (this.kdbxQuery) {
                     this.searchHelper.debounceSearch(value, this.kdbxQuery, this.kdbxEntryManager ?? undefined)
                   }
                 })
 
-              // 清空搜索按钮
               if (this.searchState.query) {
                 Button() {
                   Text('×')
@@ -1706,8 +1594,7 @@ struct MainPage {
                 .padding(4)
                 .margin({ left: 4 })
                 .onClick(() => {
-                  // 重置自动关闭计时器
-                  this.resetAutoCloseTimer()
+                  AutoCloseManager.getInstance().reset()
                   
                   this.searchHelper.clearSearch()
                 })
@@ -1715,7 +1602,6 @@ struct MainPage {
             }
             .layoutWeight(1)
 
-            // 新增按钮
             Button() {
               Image($r('app.media.new'))
                 .width(20)
@@ -1728,10 +1614,8 @@ struct MainPage {
             .margin({ left: 8 })
             .enabled(!this.isInRecycleBin() && !this.isAddingEntry && !this.isEditingEntry)
             .onClick(() => {
-              // 重置自动关闭计时器
-              this.resetAutoCloseTimer()
+              AutoCloseManager.getInstance().reset()
               
-              // 显示添加表单
               this.showAddForm()
             })
           }
@@ -1741,7 +1625,6 @@ struct MainPage {
           .backgroundColor('#f8f9fa')
           .border({ width: { bottom: 1 }, color: '#e0e0e0' })
 
-          // 搜索结果统计
           if (this.searchState.isSearching) {
             Row() {
               Text(`搜索结果：${this.searchState.results.length} 个条目`)
@@ -1762,7 +1645,6 @@ struct MainPage {
             .alignItems(VerticalAlign.Center)
           }
 
-          // 条目列表
           if (this.isLoading) {
             Column() {
               LoadingProgress()
@@ -1804,7 +1686,6 @@ struct MainPage {
                   Column() {
                     this.EntryItemView(entry)
                     
-                    // 分割线
                     if (entry.id !== EntryService.getCurrentDisplayEntries(this.searchState, this.entryItems)[EntryService.getCurrentDisplayEntries(this.searchState, this.entryItems).length - 1]?.id) {
                       Divider()
                         .strokeWidth(0.8)
@@ -1831,7 +1712,6 @@ struct MainPage {
         .height('100%')
         .backgroundColor('#fff')
 
-        // 分割线
         Divider()
           .vertical(true)
           .color('#e0e0e0')
@@ -1839,8 +1719,7 @@ struct MainPage {
           .gesture(
             PanGesture({ direction: PanDirection.Horizontal, fingers: 1 })
               .onActionStart(() => {
-                // 重置自动关闭计时器
-                this.resetAutoCloseTimer()
+                AutoCloseManager.getInstance().reset()
               })
               .onActionUpdate((event: GestureEvent) => {
                 let newSecondWidth = this.secondColumnWidth + event.offsetX
@@ -1852,7 +1731,6 @@ struct MainPage {
                })
           )
 
-        // 第三栏：详情面板
         Column() {
           this.DetailPanelView()
         }
@@ -1867,37 +1745,10 @@ struct MainPage {
   }
 
   /**
-   * 启动自动关闭计时器
-   */
-  private startAutoCloseTimer(): void {
-    this.autoCloseTimer = LayoutPreferencesUtil.startAutoCloseTimer(
-      this.autoCloseTimer,
-      this.AUTO_CLOSE_TIMEOUT,
-      () => this.autoCloseDatabase()
-    )
-  }
-
-  /**
-   * 重置自动关闭计时器
-   */
-  private resetAutoCloseTimer(): void {
-    this.startAutoCloseTimer()
-  }
-
-  /**
-   * 清除自动关闭计时器
-   */
-  private clearAutoCloseTimer(): void {
-    LayoutPreferencesUtil.clearAutoCloseTimer(this.autoCloseTimer)
-    this.autoCloseTimer = null
-  }
-
-  /**
    * 自动关闭数据库
    */
   private async autoCloseDatabase(): Promise<void> {
     try {
-      // 执行与返回按钮相同的逻辑
       await DatabaseFileService.returnToIndex(this.kdbxCore, this.databaseFileManager)
     } catch (error) {
       console.error('MainPage', '自动关闭数据库失败:', error)
@@ -1908,16 +1759,14 @@ struct MainPage {
    * 页面即将消失时清理计时器
    */
   aboutToDisappear() {
-    this.clearAutoCloseTimer()
+    AutoCloseManager.getInstance().pause()
     this.searchHelper.destroy()
     
-    // 清理复制成功提醒定时器
     if (this.copySuccessTimer !== null) {
       clearTimeout(this.copySuccessTimer)
       this.copySuccessTimer = null
     }
     
-    // 清理验证错误提醒定时器
     if (this.validationErrorTimer !== null) {
       clearTimeout(this.validationErrorTimer)
       this.validationErrorTimer = null
