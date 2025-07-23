@@ -67,7 +67,10 @@ struct KdbxPage {
   // 双击检测相关
   private lastClickTime: number = 0
   private lastClickedId: string = ''
-  private readonly DOUBLE_CLICK_INTERVAL: number = 300 
+  private readonly DOUBLE_CLICK_INTERVAL: number = 300
+  
+  // 备份相关状态
+  @State private isBackingUp: boolean = false 
 
   async aboutToAppear() {
     try {
@@ -627,11 +630,40 @@ struct KdbxPage {
             }
           })
 
+          // 备份密码库按钮
+          Button() {
+            Row() {
+              Image($r('app.media.icon'))
+                .width(16)
+                .height(16)
+                .fillColor('#fff')
+                .margin({ right: 8 })
+
+              Text('备份密码库')
+                .fontSize(14)
+                .fontColor('#fff')
+                .fontWeight(FontWeight.Medium)
+            }
+            .justifyContent(FlexAlign.Center)
+            .alignItems(VerticalAlign.Center)
+          }
+          .width('30%')
+          .height(40)
+          .backgroundColor('#52c41a')
+          .borderRadius(8)
+          .margin({ left: 16, right: 16, top: 20, bottom: 10 })
+          .opacity(this.isBackingUp ? 0.6 : 1)
+          .enabled(!this.isBackingUp)
+          .onClick(() => {
+            this.backupDatabase();
+          })
+
           Blank()
             .layoutWeight(1)
         }
         .width('100%')
         .padding({ left: 20, right: 20, top: 16, bottom: 16 })
+        .alignItems(HorizontalAlign.Start)
         .justifyContent(FlexAlign.Start)
       }
       .width('100%')
@@ -1065,7 +1097,16 @@ struct KdbxPage {
       if (result && result.length > 0) {
         const fileUri = result[0];
         this.importFilePath = fileUri;
-        this.importFileName = fileUri.split('/').pop() || '未知文件';
+        
+        // 解码URL编码的文件名，去除%编码
+        let fileName = fileUri.split('/').pop() || '未知文件';
+        try {
+          fileName = decodeURIComponent(fileName);
+        } catch (error) {
+          // 如果解码失败，使用原始文件名
+          console.warn('KdbxPage', '导入文件名解码失败:', error);
+        }
+        this.importFileName = fileName;
         
         // 验证文件是否存在且可读
         try {
@@ -1222,6 +1263,100 @@ struct KdbxPage {
     } catch (error) {
       console.error('KdbxPage', '导入密码库失败:', error);
       this.showFormError('导入密码库时发生异常');
+    }
+  }
+
+  /** 备份密码库到用户选择的位置 */
+  private async backupDatabase() {
+    if (!this.selectedDatabase || this.isBackingUp) {
+      return;
+    }
+
+    this.isBackingUp = true;
+
+    try {
+      const context = getContext(this) as common.Context;
+      
+      // 获取密码库文件路径
+      let sourceFilePath: string;
+      if (this.selectedDatabase.path.includes('/')) {
+        // 绝对路径
+        sourceFilePath = this.selectedDatabase.path;
+      } else {
+        // 相对路径（应用内部文件）
+        sourceFilePath = `${context.filesDir}/${this.selectedDatabase.path}`;
+      }
+
+      // 检查源文件是否存在
+      try {
+        await fs.access(sourceFilePath);
+      } catch (error) {
+        this.showFormError('密码库文件不存在或无法访问');
+        return;
+      }
+
+      // 读取源文件内容
+      const sourceFile = fs.openSync(sourceFilePath, fs.OpenMode.READ_ONLY);
+      const stat = await fs.stat(sourceFile.fd);
+      const fileContent = new ArrayBuffer(stat.size);
+      await fs.read(sourceFile.fd, fileContent);
+      fs.closeSync(sourceFile);
+
+      // 生成默认备份文件名
+      const timestamp = new Date().toISOString().split('T')[0].replace(/-/g, '');
+      const timeStr = new Date().toTimeString().split(' ')[0].replace(/:/g, '');
+      const defaultBackupFileName = `${this.selectedDatabase.name}_备份_${timestamp}_${timeStr}.kdbx`;
+
+      // 使用DocumentViewPicker让用户选择保存位置
+      const documentPicker = new picker.DocumentViewPicker(context);
+      const documentSaveOptions = new picker.DocumentSaveOptions();
+      
+      // 设置默认文件名
+      documentSaveOptions.newFileNames = [defaultBackupFileName];
+      
+      const saveResult = await documentPicker.save(documentSaveOptions);
+      
+      if (saveResult && saveResult.length > 0) {
+        const targetPath = saveResult[0];
+        
+        // 写入到用户选择的位置
+        const targetFile = fs.openSync(targetPath, fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY | fs.OpenMode.TRUNC);
+        await fs.write(targetFile.fd, fileContent);
+        fs.closeSync(targetFile);
+
+        // 显示成功提示
+        let displayPath = targetPath;
+        // 解码URL编码的路径，去除%编码
+        try {
+          displayPath = decodeURIComponent(targetPath);
+        } catch (error) {
+          // 如果解码失败，使用原始路径
+          console.warn('KdbxPage', '路径解码失败:', error);
+        }
+        
+        const fileName = displayPath.split('/').pop() || defaultBackupFileName;
+        this.successToastMessage = `备份成功！已保存: ${fileName}`;
+        this.showCopySuccessToast = true;
+        
+        if (this.copySuccessTimer !== null) {
+          clearTimeout(this.copySuccessTimer);
+        }
+        this.copySuccessTimer = setTimeout(() => {
+          this.showCopySuccessToast = false;
+          this.copySuccessTimer = null;
+        }, 4000);
+
+        console.info('KdbxPage', '密码库备份成功:', targetPath);
+      } else {
+        // 用户取消了保存操作
+        console.info('KdbxPage', '用户取消了备份操作');
+      }
+      
+    } catch (error) {
+      console.error('KdbxPage', '备份密码库失败:', error);
+      this.showFormError('备份密码库失败，请重试');
+    } finally {
+      this.isBackingUp = false;
     }
   }
 
