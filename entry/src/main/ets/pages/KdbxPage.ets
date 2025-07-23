@@ -9,6 +9,9 @@ import { KdbxCore, KdbxCoreManager } from '../utils/KdbxCore'
 import { ProtectedValue, KdbxCredentials } from '../lib'
 import { ClipboardUtil } from '../utils/ClipboardUtil'
 import { DatabaseItem, DisplayDatabaseItem, convertToDisplayItem, isValidKdbxFileName } from '../utils/DatabaseDisplayUtil'
+import picker from '@ohos.file.picker'
+import { common } from '@kit.AbilityKit'
+import { BusinessError } from '@kit.BasicServicesKit'
 
 @Entry
 @Component
@@ -53,6 +56,13 @@ struct KdbxPage {
   @State private formError: string = ''
   @State private showSwitchSuccessToast: boolean = false 
   @State private switchSuccessMessage: string = '切换密码库成功'
+  
+  // 导入密码库相关状态
+  @State private isImportingDatabase: boolean = false
+  @State private importFilePath: string = ''
+  @State private importFileName: string = ''
+  @State private importPassword: string = ''
+  @State private importConfirmPassword: string = ''
   
   // 双击检测相关
   private lastClickTime: number = 0
@@ -1030,6 +1040,191 @@ struct KdbxPage {
     this.formError = '';
   }
 
+  /** 选择并导入外部密码库文件 */
+  private async selectDatabaseFile() {
+    this.isImportingDatabase = true;
+    this.importFilePath = '';
+    this.importFileName = '';
+    this.importPassword = '';
+    this.importConfirmPassword = '';
+  }
+
+  /** 从文件系统选择密码库文件 */
+  private async pickDatabaseFile() {
+    try {
+      const context = getContext(this) as common.Context;
+      const documentPicker = new picker.DocumentViewPicker(context);
+      const documentSelectOptions = new picker.DocumentSelectOptions();
+      
+      // 设置选择选项
+      documentSelectOptions.maxSelectNumber = 1;
+      documentSelectOptions.fileSuffixFilters = ['密码库文件|.kdbx'];
+      
+      const result = await documentPicker.select(documentSelectOptions);
+      
+      if (result && result.length > 0) {
+        const fileUri = result[0];
+        this.importFilePath = fileUri;
+        this.importFileName = fileUri.split('/').pop() || '未知文件';
+        
+        // 验证文件是否存在且可读
+        try {
+          const file = fs.openSync(fileUri, fs.OpenMode.READ_ONLY);
+          const stat = await fs.stat(file.fd);
+          fs.closeSync(file);
+          
+          if (stat.size === 0) {
+            this.showFormError('选择的文件为空');
+            this.importFilePath = '';
+            this.importFileName = '';
+            return;
+          }
+        } catch (error) {
+          this.showFormError('无法读取选择的文件');
+          this.importFilePath = '';
+          this.importFileName = '';
+          return;
+        }
+      }
+    } catch (error) {
+      console.error('KdbxPage', '选择文件失败:', error);
+      this.showFormError('文件选择失败');
+    }
+  }
+
+  /** 取消导入密码库 */
+  private cancelImportDatabase() {
+    this.isImportingDatabase = false;
+    this.importFilePath = '';
+    this.importFileName = '';
+    this.importPassword = '';
+    this.importConfirmPassword = '';
+    
+    if (this.formErrorTimer !== null) {
+      clearTimeout(this.formErrorTimer);
+      this.formErrorTimer = null;
+    }
+    this.formError = '';
+  }
+
+  /** 确认导入选择的密码库文件 */
+  private async confirmImportDatabase() {
+    if (!this.importFilePath) {
+      this.showFormError('请先选择密码库文件');
+      return;
+    }
+    
+    if (!this.importPassword.trim()) {
+      this.showFormError('请输入密码');
+      return;
+    }
+
+    try {
+      // 读取文件内容
+      const file = fs.openSync(this.importFilePath, fs.OpenMode.READ_ONLY);
+      const stat = await fs.stat(file.fd);
+      const arrayBuffer = new ArrayBuffer(stat.size);
+      await fs.read(file.fd, arrayBuffer);
+      fs.closeSync(file);
+
+      // 尝试使用KdbxCore加载数据库
+      const kdbxCore = new KdbxCore();
+      const loadResult = await kdbxCore.loadFromBuffer(arrayBuffer, {
+        password: this.importPassword,
+        validateIntegrity: true
+      });
+
+      if (!loadResult.success) {
+        const errorMsg: string = loadResult.error || '';
+        
+        if (errorMsg.includes('Invalid') || errorMsg.toLowerCase().includes('wrong key')) {
+          this.showFormError('密码错误，请重试');
+        } else if (errorMsg.includes('argon2 not implemented') || errorMsg.includes('bad kdf')) {
+          this.showFormError('此密码库使用 Argon2 密钥派生函数，当前版本暂不支持。请使用 AES-KDF 类型的密码库。');
+        } else {
+          this.showFormError('无法打开密码库: ' + errorMsg);
+        }
+        return;
+      }
+
+      // 获取数据库名称
+      const database = kdbxCore.getDatabase();
+      const dbName: string = database?.meta?.name || this.importFileName.replace('.kdbx', '');
+      
+      // 复制文件到应用私有目录
+      const context = getContext(this) as Context;
+      const timestamp = Date.now().toString();
+      const internalFileName = `imported_${timestamp}.kdbx`;
+      const internalPath = `${context.filesDir}/${internalFileName}`;
+      
+      // 将文件复制到内部存储
+      const sourceFile = fs.openSync(this.importFilePath, fs.OpenMode.READ_ONLY);
+      const targetFile = fs.openSync(internalPath, fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY);
+      
+      const sourceBuffer = new ArrayBuffer(stat.size);
+      await fs.read(sourceFile.fd, sourceBuffer);
+      await fs.write(targetFile.fd, sourceBuffer);
+      
+      fs.closeSync(sourceFile);
+      fs.closeSync(targetFile);
+
+      // 添加到密码库列表
+      const newId = Date.now().toString();
+      const newOriginalItem: DatabaseItem = {
+        id: newId,
+        name: dbName,
+        path: internalFileName,  // 使用内部文件名
+        lastModified: new Date().toISOString().split('T')[0],
+        size: stat.size
+      };
+
+      let currentOriginalList: DatabaseItem[] = [];
+      try {
+        const listJson = PreferencesUtil.getKdbxDatabaseListSync();
+        currentOriginalList = JSON.parse(listJson) as DatabaseItem[];
+      } catch (e) {
+        currentOriginalList = [];
+      }
+      
+      currentOriginalList.push(newOriginalItem);
+      PreferencesUtil.saveKdbxDatabaseListSync(JSON.stringify(currentOriginalList));
+
+      const ctxNew = getContext(this) as Context;
+      const newDisplayItem = convertToDisplayItem(newOriginalItem, ctxNew);
+      this.databaseItems.push(newDisplayItem);
+
+      // 设置为当前选中的密码库
+      this.selectedDatabaseId = newId;
+      this.selectedDatabase = {
+        id: newDisplayItem.id,
+        name: newDisplayItem.name,
+        path: newDisplayItem.path,
+        lastModified: newDisplayItem.lastModified,
+        size: newDisplayItem.size,
+        displayDir: newDisplayItem.displayDir,
+        displayFileName: newDisplayItem.displayFileName,
+        displaySize: newDisplayItem.displaySize
+      };
+
+      this.cancelImportDatabase();
+      
+      this.successToastMessage = `密码库 "${dbName}" 已成功导入`;
+      this.showCopySuccessToast = true;
+      
+      if (this.copySuccessTimer !== null) {
+        clearTimeout(this.copySuccessTimer);
+      }
+      this.copySuccessTimer = setTimeout(() => {
+        this.showCopySuccessToast = false;
+        this.copySuccessTimer = null;
+      }, 3000);
+
+    } catch (error) {
+      console.error('KdbxPage', '导入密码库失败:', error);
+      this.showFormError('导入密码库时发生异常');
+    }
+  }
+
   /** 新增密码库表单视图 */
   @Builder
   private CreateDatabaseFormView() {
@@ -1120,8 +1315,8 @@ struct KdbxPage {
         Row() {
           Button('创建新的密码库')
             .width('30%')
-            .height(50)
-            .fontSize(16)
+            .height(40)
+            .fontSize(14)
             .fontWeight(FontWeight.Medium)
             .backgroundColor('#1976D2')
             .borderRadius(8)
@@ -1131,8 +1326,8 @@ struct KdbxPage {
             })
 
           Button('取消')
-            .height(50)
-            .fontSize(16)
+            .height(40)
+            .fontSize(14)
             .backgroundColor('#f0f0f0')
             .fontColor('#000')
             .padding({ left: 20, right: 20, top: 10, bottom: 10 })
@@ -1144,6 +1339,164 @@ struct KdbxPage {
         .width('100%')
         .margin({ top: 12 })
 
+      }
+      .width('100%')
+      .padding({ left: 20, right: 20, top: 16, bottom: 16 })
+    }
+    .width('100%')
+    .height('100%')
+  }
+
+  /** 导入密码库表单视图 */
+  @Builder
+  private ImportDatabaseFormView() {
+    Column() {
+      Column() {
+        Text('导入外部密码库')
+          .fontSize(18)
+          .fontWeight(FontWeight.Medium)
+          .fontColor('#000')
+          .margin({ bottom: 20 })
+
+        // 文件选择区域
+        Column() {
+          if (!this.importFilePath) {
+            Image($r('app.media.icon'))
+              .width(60)
+              .height(60)
+              .opacity(0.5)
+              .margin({ bottom: 10 })
+
+            Text('点击选择 .kdbx 文件')
+              .fontSize(14)
+              .fontColor('#666')
+          } else {
+            Image($r('app.media.success'))
+              .width(40)
+              .height(40)
+              .fillColor('#52c41a')
+              .margin({ bottom: 10 })
+
+            Text(this.importFileName)
+              .fontSize(14)
+              .fontColor('#000')
+              .maxLines(2)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .width('90%')
+              .textAlign(TextAlign.Center)
+          }
+        }
+        .width('100%')
+        .height(120)
+        .border({ width: 1, color: '#ddd', style: BorderStyle.Dashed })
+        .borderRadius(8)
+        .justifyContent(FlexAlign.Center)
+        .backgroundColor('#f9f9f9')
+        .margin({ bottom: 16 })
+        .onClick(() => {
+          this.pickDatabaseFile();
+        })
+
+        Row() {
+          Button(this.importFilePath ? '重新选择文件' : '选择密码库文件')
+            .onClick(() => {
+              this.pickDatabaseFile();
+            })
+            .width('30%')
+            .height(40)
+            .fontSize(14)
+            .backgroundColor('#007dff')
+            .borderRadius(6)
+            .margin({ right: 5 })
+
+          Button('取消')
+            .height(40)
+            .fontSize(14)
+            .backgroundColor('#f0f0f0')
+            .fontColor('#000')
+            .padding({ left: 20, right: 20, top: 10, bottom: 10 })
+            .borderRadius(6)
+            .onClick(() => {
+              this.cancelImportDatabase();
+            })
+        }
+        .width('100%')
+        .margin({ bottom: 16 })
+
+        if (this.importFilePath) {
+          Column() {
+            Text('主密码')
+              .fontSize(16)
+              .fontWeight(FontWeight.Medium)
+              .fontColor('#333')
+              .margin({ bottom: 8 })
+              .width('100%')
+              .textAlign(TextAlign.Start)
+
+            TextInput({ 
+              text: this.importPassword, 
+              placeholder: '请输入密码库的主密码' 
+            })
+              .type(InputType.Password)
+              .onChange((val: string) => {
+                this.importPassword = val;
+              })
+              .fontSize(16)
+              .border({ width: 1, color: '#ddd' })
+              .borderRadius(4)
+              .padding(12)
+              .width('100%')
+          }
+          .width('100%')
+          .margin({ bottom: 16 })
+          .alignItems(HorizontalAlign.Start)
+
+          Row() {
+            Button('导入密码库')
+              .onClick(() => {
+                this.confirmImportDatabase();
+              })
+              .width('40%')
+              .height(45)
+              .fontSize(16)
+              .fontWeight(FontWeight.Medium)
+              .backgroundColor('#52c41a')
+              .borderRadius(8)
+              .margin({ right: 10 })
+
+            Button('取消')
+              .onClick(() => {
+                this.cancelImportDatabase();
+              })
+              .width('30%')
+              .height(45)
+              .fontSize(16)
+              .backgroundColor('#f0f0f0')
+              .fontColor('#666')
+              .borderRadius(8)
+          }
+          .width('100%')
+          .justifyContent(FlexAlign.Center)
+          .margin({ top: 10 })
+        }
+
+        Column() {
+          Text('说明')
+            .fontSize(16)
+            .fontColor('#333')
+            .fontWeight(FontWeight.Medium)
+            .margin({ bottom: 8 })
+
+          Text('• 支持导入标准 KeePass (.kdbx) 格式的密码库文件\n• 文件可以从桌面、下载目录或其他位置选择\n• 密码库将被复制到应用内部存储中\n• 请确保输入正确的主密码\n• 仅支持 AES-KDF 密钥派生函数\n• 暂不支持 Argon2 密钥派生函数')
+            .fontSize(14)
+            .fontColor('#666')
+            .lineHeight(20)
+            .padding(12)
+            .backgroundColor('#f9f9f9')
+            .borderRadius(4)
+        }
+        .width('100%')
+        .alignItems(HorizontalAlign.Start)
       }
       .width('100%')
       .padding({ left: 20, right: 20, top: 16, bottom: 16 })
@@ -1530,9 +1883,29 @@ struct KdbxPage {
                   .backgroundColor('#f0f7ff')
                   .border({ width: 1, color: '#007AFF', style: BorderStyle.Dashed })
                   .borderRadius(6)
-                  .margin({ left: 16, right: 16, top: 20, bottom: 16 })
+                  .margin({ left: 16, right: 16, top: 20, bottom: 8 })
                   .onClick(() => {
                     this.createNewDatabase();
+                  })
+
+                  Button() {
+                    Row() {
+                      Text('导入密码库')
+                        .fontSize(16)
+                        .fontColor('#52c41a')
+                        .fontWeight(FontWeight.Medium)
+                    }
+                    .justifyContent(FlexAlign.Center)
+                    .alignItems(VerticalAlign.Center)
+                  }
+                  .width('70%')
+                  .height(32)
+                  .backgroundColor('#f6ffed')
+                  .border({ width: 1, color: '#52c41a', style: BorderStyle.Dashed })
+                  .borderRadius(6)
+                  .margin({ left: 16, right: 16, top: 8, bottom: 16 })
+                  .onClick(() => {
+                    this.selectDatabaseFile();
                   })
                 }
                 .width('100%')
@@ -1593,8 +1966,9 @@ struct KdbxPage {
         Column() {
           Row() {
             Text(this.isAddingDatabase ? '创建密码库' : 
-                 (this.isEditing ? `编辑密码库: ${this.editingName || this.selectedDatabase?.name || ''}` : 
-                  (this.selectedDatabase ? this.selectedDatabase.name : '未选择密码库')))
+                 (this.isImportingDatabase ? '导入密码库' :
+                  (this.isEditing ? `编辑密码库: ${this.editingName || this.selectedDatabase?.name || ''}` : 
+                   (this.selectedDatabase ? this.selectedDatabase.name : '未选择密码库'))))
                .fontSize(18)
                .fontWeight(FontWeight.Medium)
                .fontColor('#000')
@@ -1602,7 +1976,7 @@ struct KdbxPage {
                .maxLines(1)
                .textOverflow({ overflow: TextOverflow.Ellipsis })
 
-            if (!this.isAddingDatabase && this.canEditSelectedDatabase()) {
+            if (!this.isAddingDatabase && !this.isImportingDatabase && this.canEditSelectedDatabase()) {
               Button() {
                 Image($r('app.media.edit'))
                   .width(20)
@@ -1629,6 +2003,8 @@ struct KdbxPage {
           Column() {
             if (this.isAddingDatabase) {
               this.CreateDatabaseFormView()
+            } else if (this.isImportingDatabase) {
+              this.ImportDatabaseFormView()
             } else if (this.isEditing) {
               this.EditPanelView()
             } else {
@@ -1638,7 +2014,7 @@ struct KdbxPage {
           .layoutWeight(1)
           .width('100%')
           .backgroundColor('#fff')
-          .key(`content_panel_${this.selectedDatabase?.id || 'none'}_${this.isEditing ? 'edit' : 'view'}`)
+          .key(`content_panel_${this.selectedDatabase?.id || 'none'}_${this.isEditing ? 'edit' : (this.isImportingDatabase ? 'import' : 'view')}`)
 
           if (this.formError) {
             Row() {
