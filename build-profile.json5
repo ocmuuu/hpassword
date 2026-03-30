@@ -5,26 +5,26 @@
         "name": "default",
         "type": "HarmonyOS",
         "material": {
-          "storeFile": "C:/App/hpassword/hpassword.p12",
-          "storePassword": "0000001A7229D1CD5F3AD8CF2AE6DD74732320872430BEE3555BE959833DDBEA45205623A7C7209C65AA",
+          "certpath": "C:/App/hpassword/hpassword.cer",
           "keyAlias": "hpassword",
-          "keyPassword": "0000001A7FDF8328E197745E6C901AB40E83F4B34AD6341D83FD2E08CFC39C6F1FEA8FAB0A3546283FED",
-          "signAlg": "SHA256withECDSA",
+          "keyPassword": "0000001AF632AC3E08DA703DBAF52821D1E45611ED251F282B9C534E74430DD8F6C1417D3EA7BAE3E37A",
           "profile": "C:/App/hpassword/hpasswordRelease.p7b",
-          "certpath": "C:/App/hpassword/hpassword.cer"
+          "signAlg": "SHA256withECDSA",
+          "storeFile": "C:/App/hpassword/hpassword.p12",
+          "storePassword": "0000001A40FF019E0AC6E98F88E58A0AF85DDF39E1358D80EFCDBA8CBF5C078C8718789D5BDAB506D287"
         }
       },
       {
         "name": "devicedebug",
         "type": "HarmonyOS",
         "material": {
-          "certpath": "C:\\Users\\chaon\\.ohos\\config\\debug_hPassword_fRehQaxwY9pW47RoKaawGjjK71GPP7wIOVxKP3n61MM=.cer",
+          "certpath": "C:/Users/chaon/.ohos/config/debug_hPassword_fRehQaxwY9pW47RoKaawGjjK71GPP7wIOVxKP3n61MM=.cer",
           "keyAlias": "debugKey",
-          "keyPassword": "0000001A7D0444DAAC42B6CAB099D220F2156E5911361EB98BEBBDC39C24FEFB6DEADE2ED5FB3E98D7E9",
-          "profile": "C:\\Users\\chaon\\.ohos\\config\\debug_hPassword_fRehQaxwY9pW47RoKaawGjjK71GPP7wIOVxKP3n61MM=.p7b",
+          "keyPassword": "0000001A0B31CD38DDB62ECCBF3B061F2C46C2ECE682C5CA99D7531AE4E1D51980A7196A803DF28E9967",
+          "profile": "C:/Users/chaon/.ohos/config/debug_hPassword_fRehQaxwY9pW47RoKaawGjjK71GPP7wIOVxKP3n61MM=.p7b",
           "signAlg": "SHA256withECDSA",
-          "storeFile": "C:\\Users\\chaon\\.ohos\\config\\debug_hPassword_fRehQaxwY9pW47RoKaawGjjK71GPP7wIOVxKP3n61MM=.p12",
-          "storePassword": "0000001AE9D0245FF624233EF98D6859B08617710387E4FD4AE3A31522079F942B28BA6E5F61A07903DB"
+          "storeFile": "C:/Users/chaon/.ohos/config/debug_hPassword_fRehQaxwY9pW47RoKaawGjjK71GPP7wIOVxKP3n61MM=.p12",
+          "storePassword": "0000001A3ADB33EB535D79F87C0E9669478BF2173B9B376496AC93AC38885550838629956023F23D94B0"
         }
       }
     ],
@@ -32,14 +32,14 @@
       {
         "name": "default",
         "signingConfig": "default",
-        "compatibleSdkVersion": "5.0.5(17)",
+        "compatibleSdkVersion": "6.0.2(22)",
         "runtimeOS": "HarmonyOS",
         "bundleName": "com.mznm.hpassword"
       },
       {
         "name": "devicedebug",
         "signingConfig": "devicedebug",
-        "compatibleSdkVersion": "5.0.5(17)",
+        "compatibleSdkVersion": "6.0.2(22)",
         "runtimeOS": "HarmonyOS",
         "bundleName": "com.mznm.hpassword"
       }
